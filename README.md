@@ -91,6 +91,7 @@ CREATE USER "user" WITH PASSWORD '<userpassword>'
 CREATE DATABASE "iobroker"
 GRANT ALL ON "iobroker" TO "user"
 ```
+
 Enable authentication by editing /etc/influxdb/influxdb.conf:
 ```
  [http]  
@@ -381,8 +382,7 @@ sendTo('influxdb.0', 'update', [
 If you want to flush the buffers for one or all data points to the Database, you can use the build in system function `flushBuffer`:
 
 ```javascript
-sendTo('influxdb.0', 'flushBuffer', {id: 'mbus.0.counter.xxx'
-, result => console.log('deleted, error: ' + result.error));
+sendTo('influxdb.0', 'flushBuffer', {id: 'mbus.0.counter.xxx'}, result => console.log('deleted, error: ' + result.error));
 ```
 if no id is provided, all buffers will be flushed.
 
