@@ -37,7 +37,7 @@ function isEqual(a: InfluxDbCustomConfigTyped, b: InfluxDbCustomConfigTyped): bo
         b,
     ) as (keyof InfluxDbCustomConfigTyped)[];
 
-    // If number of properties is different,
+    // If the number of properties is different,
     // objects are not equivalent
     if (aProps.length !== bProps.length) {
         //console.log('num props different: ' + JSON.stringify(aProps) + ' / ' + JSON.stringify(bProps));
@@ -71,6 +71,35 @@ function sortByTs(
     const aTs = a.ts;
     const bTs = b.ts;
     return aTs < bTs ? -1 : aTs > bTs ? 1 : 0;
+}
+
+function parseBool(value: any, defaultValue?: boolean): boolean {
+    if (value !== undefined && value !== null && value !== '') {
+        return value === true || value === 'true' || value === 1 || value === '1';
+    }
+    return defaultValue || false;
+}
+
+function parseNumber(value: any, defaultValue?: number): number {
+    if (typeof value === 'number') {
+        return value;
+    }
+    if (typeof value === 'string') {
+        const v = parseFloat(value);
+        return isNaN(v) ? defaultValue || 0 : v;
+    }
+    return defaultValue || 0;
+}
+
+function parseNumberWithNull(value: any): number | null {
+    if (typeof value === 'number') {
+        return value;
+    }
+    if (typeof value === 'string') {
+        const v = parseFloat(value);
+        return isNaN(v) ? null : v;
+    }
+    return null;
 }
 
 interface SavedInfluxDbCustomConfig extends InfluxDbCustomConfigTyped {
@@ -115,7 +144,7 @@ export class InfluxDBAdapter extends Adapter {
             message: (obj: ioBroker.Message) => this.processMessage(obj),
             stateChange: (id: string, state: ioBroker.State | null | undefined): void => {
                 id = this._aliasMap[id] ? this._aliasMap[id] : id;
-                this.pushHistory(id, state);
+                void this.pushHistory(id, state);
             },
             objectChange: (id: string, obj: ioBroker.Object | null | undefined): void => {
                 const formerAliasId = this._aliasMap[id] ? this._aliasMap[id] : id;
@@ -182,12 +211,10 @@ export class InfluxDBAdapter extends Adapter {
                     }
 
                     // changesOnly
-                    customSettings.changesOnly =
-                        customSettings.changesOnly === 'true' || customSettings.changesOnly === true;
+                    customSettings.changesOnly = parseBool(customSettings.changesOnly);
 
                     // ignoreZero
-                    customSettings.ignoreZero =
-                        customSettings.ignoreZero === 'true' || customSettings.ignoreZero === true;
+                    customSettings.ignoreZero = parseBool(customSettings.ignoreZero);
 
                     // round
                     if (
@@ -226,7 +253,7 @@ export class InfluxDBAdapter extends Adapter {
                     ) {
                         customSettings.ignoreBelowNumber =
                             parseFloat(customSettings.ignoreBelowNumber as string) || null;
-                    } else if (customSettings.ignoreBelowZero === 'true' || customSettings.ignoreBelowZero === true) {
+                    } else if (parseBool(customSettings.ignoreBelowZero)) {
                         customSettings.ignoreBelowNumber = 0;
                     }
 
@@ -236,45 +263,31 @@ export class InfluxDBAdapter extends Adapter {
                         customSettings.disableSkippedValueLogging !== null &&
                         customSettings.disableSkippedValueLogging !== ''
                     ) {
-                        customSettings.disableSkippedValueLogging =
-                            customSettings.disableSkippedValueLogging === 'true' ||
-                            customSettings.disableSkippedValueLogging === true;
+                        customSettings.disableSkippedValueLogging = parseBool(
+                            customSettings.disableSkippedValueLogging,
+                        );
                     } else {
                         customSettings.disableSkippedValueLogging = this.config.disableSkippedValueLogging;
                     }
 
                     // enableDebugLogs
-                    if (
-                        customSettings.enableDebugLogs !== undefined &&
-                        customSettings.enableDebugLogs !== null &&
-                        customSettings.enableDebugLogs !== ''
-                    ) {
-                        customSettings.enableDebugLogs =
-                            customSettings.enableDebugLogs === 'true' || customSettings.enableDebugLogs === true;
-                    } else {
-                        customSettings.enableDebugLogs = this.config.enableDebugLogs;
-                    }
+                    customSettings.enableDebugLogs = parseBool(
+                        customSettings.enableDebugLogs,
+                        this.config.enableDebugLogs,
+                    );
 
-                    // changesRelogInterval
-                    if (customSettings.changesRelogInterval || customSettings.changesRelogInterval === 0) {
-                        customSettings.changesRelogInterval =
-                            parseInt(customSettings.changesRelogInterval as string, 10) || 0;
-                    } else {
-                        customSettings.changesRelogInterval = this.config.changesRelogInterval;
-                    }
+                    customSettings.changesRelogInterval = parseNumber(
+                        customSettings.changesRelogInterval,
+                        this.config.changesRelogInterval as number,
+                    );
 
-                    // changesMinDelta
-                    if (customSettings.changesMinDelta || customSettings.changesMinDelta === 0) {
-                        customSettings.changesMinDelta =
-                            parseFloat(customSettings.changesMinDelta.toString().replace(/,/g, '.')) || 0;
-                    } else {
-                        customSettings.changesMinDelta = this.config.changesMinDelta;
-                    }
+                    customSettings.changesMinDelta = parseNumber(
+                        customSettings.changesMinDelta,
+                        this.config.changesMinDelta,
+                    );
 
                     // storageType
-                    if (!customSettings.storageType) {
-                        customSettings.storageType = false;
-                    }
+                    customSettings.storageType ||= false;
 
                     if (
                         this._influxDPs[formerAliasId]?.config &&
@@ -303,7 +316,7 @@ export class InfluxDBAdapter extends Adapter {
                     this._influxDPs[id].skipped = skipped;
                     this._influxDPs[id].timeout = timeout;
 
-                    this.writeInitialValue(realId, id);
+                    void this.writeInitialValue(realId, id);
 
                     this.log.info(`enabled logging of ${id}, Alias=${id !== realId}`);
                 } else {
@@ -338,7 +351,7 @@ export class InfluxDBAdapter extends Adapter {
     setConnected(isConnected: boolean): void {
         if (this._connected !== isConnected) {
             this._connected = isConnected;
-            this.setState('info.connection', this._connected, true, err =>
+            void this.setState('info.connection', this._connected, true, err =>
                 // analyse if the state could be set (because of permissions)
                 err
                     ? this.log.error(`Can not update this._connected state: ${err}`)
@@ -405,6 +418,7 @@ export class InfluxDBAdapter extends Adapter {
 
         switch (this.config.dbversion) {
             case '2.x':
+                // eslint-disable-next-line no-control-regex
                 if (/[\x00-\x08\x0E-\x1F\x80-\xFF]/.test(this.config.token)) {
                     this.log.error('Token error: Please re-enter the token in Admin. Stopping');
                     return;
@@ -507,10 +521,10 @@ export class InfluxDBAdapter extends Adapter {
                         `that already uses ${this.config.usetags ? 'tags' : 'fields'}, or is empty.`,
                 );
                 this.setConnected(false);
-                this.finish(null);
+                await this.finish(null);
             } else {
                 this.setConnected(true);
-                this.processStartValues();
+                await this.processStartValues();
                 this.log.info('Connected!');
                 this.startPing();
             }
@@ -616,15 +630,15 @@ export class InfluxDBAdapter extends Adapter {
                 timeout = null;
             }
             if (ex.toString() === 'TypeError: undefined is not a function') {
-                return this.sendTo(
+                this.sendTo(
                     msg.from,
                     msg.command,
                     { error: 'Node.js DB driver could not be installed.' },
                     msg.callback,
                 );
-            } else {
-                return this.sendTo(msg.from, msg.command, { error: ex.toString() }, msg.callback);
+                return;
             }
+            this.sendTo(msg.from, msg.command, { error: ex.toString() }, msg.callback);
         }
     }
 
@@ -638,14 +652,14 @@ export class InfluxDBAdapter extends Adapter {
             this.sendTo(msg.from, msg.command, { error: null }, msg.callback);
             // restart adapter
             setTimeout(() => {
-                this.getForeignObject(`system.this.${this.namespace}`, (err, obj) => {
+                void this.getForeignObject(`system.this.${this.namespace}`, (err, obj) => {
                     if (!err) {
                         if (obj) {
-                            this.setForeignObject(obj._id, obj);
+                            void this.setForeignObject(obj._id, obj);
                         }
                     } else {
                         this.log.error(`Cannot read object "system.this.${this.namespace}": ${err}`);
-                        this.stop?.();
+                        void this.stop?.();
                     }
                 });
             }, 2000);
@@ -656,96 +670,108 @@ export class InfluxDBAdapter extends Adapter {
 
     async processMessage(msg: ioBroker.Message): Promise<void> {
         this.log.debug(`Incoming message ${msg.command} from ${msg.from}`);
-        if (msg.command === 'features') {
-            // influxdb 1
-            if (this.config.dbversion === '1.x') {
-                this.sendTo(
-                    msg.from,
-                    msg.command,
-                    { supportedFeatures: ['update', 'delete', 'deleteRange', 'deleteAll', 'storeState'] },
-                    msg.callback,
-                );
-            } else {
-                this.sendTo(
-                    msg.from,
-                    msg.command,
-                    { supportedFeatures: ['update', 'delete', 'deleteRange', 'deleteAll', 'storeState'] },
-                    msg.callback,
-                );
-            }
-        } else if (msg.command === 'update') {
-            this.updateState(msg);
-        } else if (msg.command === 'delete') {
-            await this.deleteStateFromDB(msg);
-        } else if (msg.command === 'deleteAll') {
-            this.deleteStateAll(msg);
-        } else if (msg.command === 'deleteRange') {
-            await this.deleteStateFromDB(msg);
-        } else if (msg.command === 'storeState') {
-            await this.storeState(msg);
-        } else if (msg.command === 'getHistory') {
-            this.config.dbversion === '1.x' ? this.getHistoryV1(msg) : this.getHistoryV2(msg);
-        } else if (msg.command === 'test') {
-            await this.testConnection(msg);
-        } else if (msg.command === 'destroy') {
-            await this.destroyDB(msg);
-        } else if (msg.command === 'query') {
-            switch (this.config.dbversion) {
-                case '2.x':
-                    // Influx 2.x uses Flux instead of InfluxQL, so for multiple statements there is no delimiter by default, so we introduce ;
-                    this.multiQuery(msg);
-                    break;
-                case '1.x':
-                default:
-                    this.query(msg);
-                    break;
-            }
-        } else if (msg.command === 'getConflictingPoints') {
-            this.getConflictingPoints(msg);
-        } else if (msg.command === 'resetConflictingPoints') {
-            this.resetConflictingPoints(msg);
-        } else if (msg.command === 'flushBuffer') {
-            const id = msg.message ? msg.message.id : undefined;
-            this.log.debug(`Flushing buffer for ${id || 'all'}`);
-            try {
-                await this.storeBufferedSeries(id);
-                if (msg.callback) {
-                    this.sendTo(msg.from, msg.command, { error: null }, msg.callback);
+        try {
+            if (msg.command === 'features') {
+                // influxdb 1
+                if (this.config.dbversion === '1.x') {
+                    this.sendTo(
+                        msg.from,
+                        msg.command,
+                        { supportedFeatures: ['update', 'delete', 'deleteRange', 'deleteAll', 'storeState'] },
+                        msg.callback,
+                    );
+                } else {
+                    this.sendTo(
+                        msg.from,
+                        msg.command,
+                        { supportedFeatures: ['update', 'delete', 'deleteRange', 'deleteAll', 'storeState'] },
+                        msg.callback,
+                    );
                 }
-            } catch (error) {
-                if (msg.callback) {
-                    this.sendTo(msg.from, msg.command, { error: error.toString() }, msg.callback);
+            } else if (msg.command === 'update') {
+                await this.updateState(msg);
+            } else if (msg.command === 'delete') {
+                await this.deleteStateFromDB(msg);
+            } else if (msg.command === 'deleteAll') {
+                await this.deleteStateAll(msg);
+            } else if (msg.command === 'deleteRange') {
+                await this.deleteStateFromDB(msg);
+            } else if (msg.command === 'storeState') {
+                await this.storeState(msg);
+            } else if (msg.command === 'getHistory') {
+                if (this.config.dbversion === '1.x') {
+                    await this.getHistoryV1(msg);
+                } else {
+                    await this.getHistoryV2(msg);
                 }
+            } else if (msg.command === 'test') {
+                await this.testConnection(msg);
+            } else if (msg.command === 'destroy') {
+                await this.destroyDB(msg);
+            } else if (msg.command === 'query') {
+                switch (this.config.dbversion) {
+                    case '2.x':
+                        // Influx 2.x uses Flux instead of InfluxQL,
+                        // so for multiple statements there is no delimiter by default, so we introduce ;
+                        await this.multiQuery(msg);
+                        break;
+                    case '1.x':
+                    default:
+                        await this.query(msg);
+                        break;
+                }
+            } else if (msg.command === 'getConflictingPoints') {
+                this.getConflictingPoints(msg);
+            } else if (msg.command === 'resetConflictingPoints') {
+                this.resetConflictingPoints(msg);
+            } else if (msg.command === 'flushBuffer') {
+                const id = msg.message ? msg.message.id : undefined;
+                this.log.debug(`Flushing buffer for ${id || 'all'}`);
+                try {
+                    await this.storeBufferedSeries(id);
+                    if (msg.callback) {
+                        this.sendTo(msg.from, msg.command, { error: null }, msg.callback);
+                    }
+                } catch (error) {
+                    if (msg.callback) {
+                        this.sendTo(msg.from, msg.command, { error: error.toString() }, msg.callback);
+                    }
+                }
+            } else if (msg.command === 'enableHistory') {
+                this.enableHistory(msg);
+            } else if (msg.command === 'disableHistory') {
+                this.disableHistory(msg);
+            } else if (msg.command === 'getEnabledDPs') {
+                this.getEnabledDPs(msg);
+            } else if (msg.command === 'stopInstance') {
+                void this.finish(() => {
+                    if (msg.callback) {
+                        this.sendTo(msg.from, msg.command, 'stopped', msg.callback);
+                        setTimeout(() => (this.terminate ? this.terminate() : process.exit()), 200);
+                    }
+                });
+            } else if (msg.command === 'getRetention') {
+                await this.getRetention(msg);
             }
-        } else if (msg.command === 'enableHistory') {
-            this.enableHistory(msg);
-        } else if (msg.command === 'disableHistory') {
-            this.disableHistory(msg);
-        } else if (msg.command === 'getEnabledDPs') {
-            this.getEnabledDPs(msg);
-        } else if (msg.command === 'stopInstance') {
-            this.finish(() => {
-                if (msg.callback) {
-                    this.sendTo(msg.from, msg.command, 'stopped', msg.callback);
-                    setTimeout(() => (this.terminate ? this.terminate() : process.exit()), 200);
-                }
-            });
-        } else if (msg.command === 'getRetention') {
-            await this.getRetention(msg);
+        } catch (error) {
+            this.log.error(`Cannot process message ${msg.command}: ${error}`);
+            if (msg.callback) {
+                this.sendTo(msg.from, msg.command, { error: error.toString() }, msg.callback);
+            }
         }
     }
 
-    getConflictingPoints(msg: ioBroker.Message) {
+    getConflictingPoints(msg: ioBroker.Message): void {
         return this.sendTo(msg.from, msg.command, { conflictingPoints: this._conflictingPoints }, msg.callback);
     }
 
-    resetConflictingPoints(msg: ioBroker.Message) {
+    resetConflictingPoints(msg: ioBroker.Message): void {
         const resultMsg = { reset: true, conflictingPoints: this._conflictingPoints };
         this._conflictingPoints = {};
         return this.sendTo(msg.from, msg.command, resultMsg, msg.callback);
     }
 
-    main() {
+    async main(): Promise<void> {
         this.config.port = parseInt(this.config.port as string, 10) || 0;
         if (this.config.relogLastValueOnStart === undefined) {
             this.config.relogLastValueOnStart = true;
@@ -753,18 +779,17 @@ export class InfluxDBAdapter extends Adapter {
             this.config.relogLastValueOnStart = false;
         }
         // set default history if not yet set
-        this.getForeignObject('system.config', (err, obj) => {
-            if (obj?.common && !obj.common.defaultHistory) {
-                obj.common.defaultHistory = this.namespace;
-                this.setForeignObject('system.config', obj, err => {
-                    if (err) {
-                        this.log.error(`Cannot set default history instance: ${err}`);
-                    } else {
-                        this.log.info(`Set default history instance to "${this.namespace}"`);
-                    }
-                });
-            }
-        });
+        const obj = await this.getForeignObjectAsync('system.config');
+        if (obj?.common && !obj.common.defaultHistory) {
+            obj.common.defaultHistory = this.namespace;
+            this.setForeignObject('system.config', obj, err => {
+                if (err) {
+                    this.log.error(`Cannot set default history instance: ${err}`);
+                } else {
+                    this.log.info(`Set default history instance to "${this.namespace}"`);
+                }
+            });
+        }
 
         this.setConnected(false);
 
@@ -782,21 +807,10 @@ export class InfluxDBAdapter extends Adapter {
         } else {
             this.config.round = null;
         }
-        if (this.config.changesRelogInterval !== null && this.config.changesRelogInterval !== undefined) {
-            this.config.changesRelogInterval = parseInt(this.config.changesRelogInterval as string, 10);
-        } else {
-            this.config.changesRelogInterval = 0;
-        }
-
+        this.config.changesRelogInterval = parseNumber(this.config.changesRelogInterval, 0);
         this.config.seriesBufferFlushInterval = parseInt(this.config.seriesBufferFlushInterval as string, 10) || 600;
-
         this.config.requestTimeout = parseInt(this.config.requestTimeout as string, 10) || 30000;
-
-        if (this.config.changesMinDelta !== null && this.config.changesMinDelta !== undefined) {
-            this.config.changesMinDelta = parseFloat(this.config.changesMinDelta.toString().replace(/,/g, '.'));
-        } else {
-            this.config.changesMinDelta = 0;
-        }
+        this.config.changesMinDelta = parseNumber(this.config.changesMinDelta.toString().replace(/,/g, '.'), 0);
 
         if (this.config.blockTime !== null && this.config.blockTime !== undefined) {
             this.config.blockTime = parseInt(this.config.blockTime as string, 10) || 0;
@@ -804,15 +818,10 @@ export class InfluxDBAdapter extends Adapter {
             if (this.config.debounce !== null && this.config.debounce !== undefined) {
                 this.config.debounce = parseInt(this.config.debounce as string, 10) || 0;
             } else {
-                this.config.blockTime = 0;
+                this.config.debounce = 0;
             }
         }
-
-        if (this.config.debounceTime !== null && this.config.debounceTime !== undefined) {
-            this.config.debounceTime = parseInt(this.config.debounceTime as string, 10) || 0;
-        } else {
-            this.config.debounceTime = 0;
-        }
+        this.config.debounceTime = parseNumber(this.config.debounceTime, 0);
 
         this.config.retention = parseInt(this.config.retention as string, 10) || 0;
         if (this.config.retention === -1) {
@@ -843,184 +852,120 @@ export class InfluxDBAdapter extends Adapter {
                 );
                 fs.unlinkSync(cacheFile);
             }
-        } catch (err) {
+        } catch {
             this.log.info('No stored data from last exit found');
         }
 
         // read all custom settings
-        this.getObjectView('system', 'custom', {}, (err, doc) => {
-            if (err) {
-                this.log.error(`main/getObjectView: ${err}`);
-            }
-            let count = 0;
-            if (doc?.rows) {
-                const l = doc.rows.length;
-                for (let i = 0; i < l; i++) {
-                    if (doc.rows[i].value) {
-                        let id = doc.rows[i].id;
-                        const realId = id;
-                        if (doc.rows[i].value[this.namespace]?.aliasId) {
-                            this._aliasMap[id] = doc.rows[i].value[this.namespace].aliasId;
-                            this.log.debug(`Found Alias: ${id} --> ${this._aliasMap[id]}`);
-                            id = this._aliasMap[id];
-                        }
-                        this._influxDPs[id] = doc.rows[i].value as SavedInfluxDbCustomConfig;
+        const doc = await this.getObjectViewAsync('system', 'custom', {});
+        let count = 0;
+        if (doc?.rows) {
+            const l = doc.rows.length;
+            for (let i = 0; i < l; i++) {
+                if (doc.rows[i].value) {
+                    let id = doc.rows[i].id;
+                    const realId = id;
+                    if (doc.rows[i].value[this.namespace]?.aliasId) {
+                        this._aliasMap[id] = doc.rows[i].value[this.namespace].aliasId;
+                        this.log.debug(`Found Alias: ${id} --> ${this._aliasMap[id]}`);
+                        id = this._aliasMap[id];
+                    }
+                    this._influxDPs[id] = doc.rows[i].value as SavedInfluxDbCustomConfig;
 
-                        if (
-                            !this._influxDPs[id].config ||
-                            typeof this._influxDPs[id].config !== 'object' ||
-                            this._influxDPs[id].config.enabled === false
-                        ) {
-                            delete this._influxDPs[id];
+                    if (
+                        !this._influxDPs[id].config ||
+                        typeof this._influxDPs[id].config !== 'object' ||
+                        this._influxDPs[id].config.enabled === false
+                    ) {
+                        delete this._influxDPs[id];
+                    } else {
+                        count++;
+                        this.log.info(
+                            `enabled logging of ${id}, Alias=${id !== realId}, ${count} points now activated`,
+                        );
+                        const storedConfig: InfluxDbCustomConfig = this._influxDPs[id].config;
+
+                        // debounceTime and debounce compatibility handling
+                        if (!storedConfig.blockTime && storedConfig.blockTime !== '0' && storedConfig.blockTime !== 0) {
+                            if (
+                                !storedConfig.debounce &&
+                                storedConfig.debounce !== '0' &&
+                                storedConfig.debounce !== 0
+                            ) {
+                                storedConfig.blockTime = this.config.blockTime || 0;
+                            } else {
+                                storedConfig.blockTime = parseInt(storedConfig.debounce as string, 10) || 0;
+                            }
                         } else {
-                            count++;
-                            this.log.info(
-                                `enabled logging of ${id}, Alias=${id !== realId}, ${count} points now activated`,
-                            );
-                            const storedConfig: InfluxDbCustomConfig = this._influxDPs[id].config;
-
-                            // debounceTime and debounce compatibility handling
-                            if (
-                                !storedConfig.blockTime &&
-                                storedConfig.blockTime !== '0' &&
-                                storedConfig.blockTime !== 0
-                            ) {
-                                if (
-                                    !storedConfig.debounce &&
-                                    storedConfig.debounce !== '0' &&
-                                    storedConfig.debounce !== 0
-                                ) {
-                                    storedConfig.blockTime = parseInt(this.config.blockTime as string, 10) || 0;
-                                } else {
-                                    storedConfig.blockTime = parseInt(storedConfig.debounce as string, 10) || 0;
-                                }
-                            } else {
-                                storedConfig.blockTime = parseInt(storedConfig.blockTime as string, 10) || 0;
-                            }
-                            if (
-                                !storedConfig.debounceTime &&
-                                storedConfig.debounceTime !== '0' &&
-                                storedConfig.debounceTime !== 0
-                            ) {
-                                storedConfig.debounceTime = parseInt(this.config.debounceTime as string, 10) || 0;
-                            } else {
-                                storedConfig.debounceTime = parseInt(storedConfig.debounceTime as string, 10) || 0;
-                            }
-
-                            storedConfig.changesOnly =
-                                storedConfig.changesOnly === 'true' || storedConfig.changesOnly === true;
-                            storedConfig.ignoreZero =
-                                storedConfig.ignoreZero === 'true' || storedConfig.ignoreZero === true;
-
-                            // round
-                            if (
-                                storedConfig.round !== null &&
-                                storedConfig.round !== undefined &&
-                                storedConfig.round !== ''
-                            ) {
-                                storedConfig.round = parseInt(storedConfig.round as string, 10);
-                                if (!isFinite(storedConfig.round) || storedConfig.round < 0) {
-                                    storedConfig.round = this.config.round;
-                                } else {
-                                    storedConfig.round = Math.pow(
-                                        10,
-                                        parseInt(storedConfig.round as unknown as string, 10),
-                                    );
-                                }
-                            } else {
-                                storedConfig.round = this.config.round;
-                            }
-
-                            // ignoreAboveNumber
-                            if (
-                                storedConfig.ignoreAboveNumber !== undefined &&
-                                storedConfig.ignoreAboveNumber !== null &&
-                                storedConfig.ignoreAboveNumber !== ''
-                            ) {
-                                storedConfig.ignoreAboveNumber =
-                                    parseFloat(storedConfig.ignoreAboveNumber as string) || null;
-                            }
-
-                            // ignoreBelowNumber and ignoreBelowZero compatibility handling
-                            if (
-                                storedConfig.ignoreBelowNumber !== undefined &&
-                                storedConfig.ignoreBelowNumber !== null &&
-                                storedConfig.ignoreBelowNumber !== ''
-                            ) {
-                                storedConfig.ignoreBelowNumber =
-                                    parseFloat(storedConfig.ignoreBelowNumber as string) || null;
-                            } else if (
-                                storedConfig.ignoreBelowZero === 'true' ||
-                                storedConfig.ignoreBelowZero === true
-                            ) {
-                                storedConfig.ignoreBelowNumber = 0;
-                            }
-
-                            // disableSkippedValueLogging
-                            if (
-                                storedConfig.disableSkippedValueLogging !== undefined &&
-                                storedConfig.disableSkippedValueLogging !== null &&
-                                storedConfig.disableSkippedValueLogging !== ''
-                            ) {
-                                storedConfig.disableSkippedValueLogging =
-                                    storedConfig.disableSkippedValueLogging === 'true' ||
-                                    storedConfig.disableSkippedValueLogging === true;
-                            } else {
-                                storedConfig.disableSkippedValueLogging = this.config.disableSkippedValueLogging;
-                            }
-
-                            // enableDebugLogs
-                            if (
-                                storedConfig.enableDebugLogs !== undefined &&
-                                storedConfig.enableDebugLogs !== null &&
-                                storedConfig.enableDebugLogs !== ''
-                            ) {
-                                storedConfig.enableDebugLogs =
-                                    storedConfig.enableDebugLogs === 'true' || storedConfig.enableDebugLogs === true;
-                            } else {
-                                storedConfig.enableDebugLogs = this.config.enableDebugLogs;
-                            }
-
-                            if (
-                                storedConfig.changesRelogInterval !== undefined &&
-                                storedConfig.changesRelogInterval !== null &&
-                                storedConfig.changesRelogInterval !== ''
-                            ) {
-                                storedConfig.changesRelogInterval =
-                                    parseInt(storedConfig.changesRelogInterval as string, 10) || 0;
-                            } else {
-                                storedConfig.changesRelogInterval = this.config.changesRelogInterval;
-                            }
-                            if (
-                                storedConfig.changesMinDelta !== undefined &&
-                                storedConfig.changesMinDelta !== null &&
-                                storedConfig.changesMinDelta !== ''
-                            ) {
-                                storedConfig.changesMinDelta = parseFloat(storedConfig.changesMinDelta as string) || 0;
-                            } else {
-                                storedConfig.changesMinDelta = this.config.changesMinDelta;
-                            }
-
-                            storedConfig.storageType ||= false;
-
-                            this._influxDPs[id].realId = realId;
-                            this.writeInitialValue(realId, id);
+                            storedConfig.blockTime = parseInt(storedConfig.blockTime as string, 10) || 0;
                         }
-                    }
-                }
-            }
+                        storedConfig.debounceTime = parseNumber(storedConfig.debounceTime, 0);
+                        storedConfig.changesOnly = parseBool(storedConfig.changesOnly);
+                        storedConfig.ignoreZero = parseBool(storedConfig.ignoreZero);
 
-            if (count < 20) {
-                for (const _id in this._influxDPs) {
-                    if (this._influxDPs.hasOwnProperty(_id)) {
-                        this.subscribeForeignStates(this._influxDPs[_id].realId);
+                        // round
+                        if (
+                            storedConfig.round !== null &&
+                            storedConfig.round !== undefined &&
+                            storedConfig.round !== ''
+                        ) {
+                            storedConfig.round = parseInt(storedConfig.round as string, 10);
+                            if (!isFinite(storedConfig.round) || storedConfig.round < 0) {
+                                storedConfig.round = this.config.round;
+                            } else {
+                                storedConfig.round = Math.pow(
+                                    10,
+                                    parseInt(storedConfig.round as unknown as string, 10),
+                                );
+                            }
+                        } else {
+                            storedConfig.round = this.config.round;
+                        }
+
+                        // ignoreAboveNumber
+                        storedConfig.ignoreAboveNumber = parseNumberWithNull(storedConfig.ignoreAboveNumber);
+
+                        storedConfig.ignoreBelowNumber = parseNumberWithNull(storedConfig.ignoreBelowNumber);
+                        if (storedConfig.ignoreBelowNumber === null && parseBool(storedConfig.ignoreBelowZero)) {
+                            storedConfig.ignoreBelowNumber = 0;
+                        }
+                        storedConfig.disableSkippedValueLogging = parseBool(
+                            storedConfig.disableSkippedValueLogging,
+                            this.config.disableSkippedValueLogging,
+                        );
+                        storedConfig.enableDebugLogs = parseBool(
+                            storedConfig.enableDebugLogs,
+                            this.config.enableDebugLogs,
+                        );
+                        storedConfig.changesRelogInterval = parseNumber(
+                            storedConfig.changesRelogInterval,
+                            this.config.changesRelogInterval,
+                        );
+                        storedConfig.changesMinDelta = parseNumber(
+                            storedConfig.changesMinDelta,
+                            this.config.changesMinDelta,
+                        );
+
+                        storedConfig.storageType ||= false;
+
+                        this._influxDPs[id].realId = realId;
+                        await this.writeInitialValue(realId, id);
                     }
                 }
-            } else {
-                this._subscribeAll = true;
-                this.subscribeForeignStates('*');
             }
-        });
+        }
+
+        // If we have less than 20 datapoints, subscribe individually, else subscribe to all
+        if (count < 20) {
+            for (const _id in this._influxDPs) {
+                if (Object.prototype.hasOwnProperty.call(this._influxDPs, _id)) {
+                    this.subscribeForeignStates(this._influxDPs[_id].realId);
+                }
+            }
+        } else {
+            this._subscribeAll = true;
+            this.subscribeForeignStates('*');
+        }
 
         this.subscribeForeignObjects('*');
 
@@ -1043,7 +988,7 @@ export class InfluxDBAdapter extends Adapter {
             if (this.config.relogLastValueOnStart) {
                 this._tasksStart.push(id);
                 if (this._tasksStart.length === 1 && this._connected) {
-                    this.processStartValues();
+                    await this.processStartValues();
                 }
             }
         }
@@ -1315,7 +1260,7 @@ export class InfluxDBAdapter extends Adapter {
         }
     }
 
-    async pushHelper(_id: string, state?: ioBroker.State | null | undefined): Promise<void> {
+    async pushHelper(_id: string, state?: ioBroker.State | null): Promise<void> {
         if (!state && !this._influxDPs[_id]?.state) {
             throw new Error(`No state to log for ID ${_id}`);
         }
@@ -1354,7 +1299,7 @@ export class InfluxDBAdapter extends Adapter {
             }
         }
         if (_settings.storageType === 'String' && typeof state.val !== 'string') {
-            state.val = state.val.toString();
+            state.val = state.val === null ? 'null' : state.val.toString();
         } else if (_settings.storageType === 'Number' && typeof state.val !== 'number') {
             if (typeof state.val === 'boolean') {
                 state.val = state.val ? 1 : 0;
@@ -1404,7 +1349,9 @@ export class InfluxDBAdapter extends Adapter {
             this._client.getHostsAvailable() > 0
         ) {
             if (this.config.seriesBufferMax !== 0) {
-                this.log.debug(`Direct writePoint("${id} - ${influxFields.value} / ${influxFields.time}")`);
+                this.log.debug(
+                    `Direct writePoint("${id} - ${influxFields.value} / ${influxFields.time.toLocaleString()}")`,
+                );
             }
             await this.writeOnePointForID(id, influxFields, true);
         } else {
@@ -1419,7 +1366,7 @@ export class InfluxDBAdapter extends Adapter {
             this._client?.getHostsAvailable()
         ) {
             if (this.config.seriesBufferMax !== 0) {
-                this.log.debug(`Direct writePoint("${id} - ${stateObj.value} / ${stateObj.time}")`);
+                this.log.debug(`Direct writePoint("${id} - ${stateObj.value} / ${stateObj.time.toLocaleString()}")`);
             }
             await this.writeOnePointForID(id, stateObj, true);
         }
@@ -1477,7 +1424,7 @@ export class InfluxDBAdapter extends Adapter {
 
         const currentBuffer = this._seriesBuffer;
         if (this._seriesBufferCounter > 15000) {
-            // if we have too many data points in buffer; we better writer them per id
+            // if we have too many data points in buffer, we better writer them per id
             this.log.info(`Too many data points (${this._seriesBufferCounter}) to write at once; write per ID`);
             await this.writeAllSeriesPerID(currentBuffer);
         } else {
@@ -2052,7 +1999,7 @@ export class InfluxDBAdapter extends Adapter {
         }
 
         if (this.config.dbversion === '1.x') {
-            let query = `SELECT * FROM "${id}" WHERE time = '${new Date(state.ts).toISOString()}'`;
+            const query = `SELECT * FROM "${id}" WHERE time = '${new Date(state.ts).toISOString()}'`;
 
             try {
                 const result = await this._client?.query<
@@ -2150,7 +2097,7 @@ export class InfluxDBAdapter extends Adapter {
                     try {
                         await this._delete(id, { ts: new Date(stored.time || stored.ts).getTime() });
                         await this.pushValueIntoDB(id, storedState, true);
-                    } catch (err) {
+                    } catch {
                         this.log.error(`Cannot delete value for ${id}: ${JSON.stringify(state)}`);
                     }
                 } else {
@@ -2301,7 +2248,7 @@ export class InfluxDBAdapter extends Adapter {
             return;
         }
 
-        let errors = [];
+        const errors = [];
         let successCount = 0;
         if (Array.isArray(msg.message)) {
             this.log.debug(`storeState ${msg.message.length} items`);
@@ -2375,7 +2322,7 @@ export class InfluxDBAdapter extends Adapter {
     }
 
     async finish(callback: (() => void) | null): Promise<void> {
-        this.setState?.('info.connection', false, true);
+        void this.setState?.('info.connection', false, true);
 
         if (!this._subscribeAll) {
             // unsubscribe
@@ -2405,7 +2352,7 @@ export class InfluxDBAdapter extends Adapter {
             this._seriesBufferChecker = null;
         }
         for (const id in this._influxDPs) {
-            if (!this._influxDPs.hasOwnProperty(id)) {
+            if (!Object.prototype.hasOwnProperty.call(this._influxDPs, id)) {
                 continue;
             }
 
@@ -2501,7 +2448,7 @@ export class InfluxDBAdapter extends Adapter {
             if (options.start && typeof options.start !== 'number') {
                 options.start = new Date(options.start).getTime();
             }
-        } catch (err) {
+        } catch {
             this.sendTo(
                 msg.from,
                 msg.command,
@@ -2517,7 +2464,7 @@ export class InfluxDBAdapter extends Adapter {
             if (options.end && typeof options.end !== 'number') {
                 options.end = new Date(options.end).getTime();
             }
-        } catch (err) {
+        } catch {
             return this.sendTo(
                 msg.from,
                 msg.command,
@@ -2753,7 +2700,7 @@ export class InfluxDBAdapter extends Adapter {
                                         item.val = storedItem.value!;
                                     }
                                     if (storedItem.time) {
-                                        item.ts = new Date(storedItem.time!).getTime();
+                                        item.ts = new Date(storedItem.time).getTime();
                                     } else if (storedItem.ts) {
                                         item.ts = new Date(storedItem.ts).getTime();
                                     }
@@ -2878,7 +2825,7 @@ export class InfluxDBAdapter extends Adapter {
             if (options.start && typeof options.start !== 'number') {
                 options.start = new Date(options.start).getTime();
             }
-        } catch (err) {
+        } catch {
             return this.sendTo(
                 msg.from,
                 msg.command,
@@ -2893,7 +2840,7 @@ export class InfluxDBAdapter extends Adapter {
             if (options.end && typeof options.end !== 'number') {
                 options.end = new Date(options.end).getTime();
             }
-        } catch (err) {
+        } catch {
             return this.sendTo(
                 msg.from,
                 msg.command,
@@ -2994,7 +2941,7 @@ export class InfluxDBAdapter extends Adapter {
         try {
             const storedCount = await this.storeBufferedSeries(id);
             setTimeout(
-                () => {
+                async () => {
                     let supportsAggregates;
                     // Detect of measurement does support aggregates (is number)
                     try {
@@ -3020,7 +2967,6 @@ export class InfluxDBAdapter extends Adapter {
                                 this.log.debug(`${logId} Bool check error: ${error.message}`);
                             }
                             supportsAggregates = true;
-                            error = null;
                         } else {
                             // real error
                             this.sendTo(
@@ -3028,7 +2974,7 @@ export class InfluxDBAdapter extends Adapter {
                                 msg.command,
                                 {
                                     result: [],
-                                    error: error,
+                                    error,
                                     sessionId: options.sessionId,
                                 },
                                 msg.callback,
@@ -3154,7 +3100,7 @@ export class InfluxDBAdapter extends Adapter {
                     }
 
                     if (debugLog) {
-                        this.log.debug(`${logId} History-queries to execute: ${fluxQueries}`);
+                        this.log.debug(`${logId} History-queries to execute: ${fluxQueries.join('\n---\n')}`);
                     }
 
                     try {
@@ -3217,7 +3163,7 @@ export class InfluxDBAdapter extends Adapter {
                                     }
 
                                     if (typeof item.val === 'number' && options.round) {
-                                        item.val = Math.round((item.val as number) * options.round) / options.round;
+                                        item.val = Math.round(item.val * options.round) / options.round;
                                     }
                                     if (options.addId) {
                                         item.id = storedItem._measurement || id;
@@ -3352,7 +3298,7 @@ export class InfluxDBAdapter extends Adapter {
         }
     }
 
-    multiQuery(msg: ioBroker.Message) {
+    async multiQuery(msg: ioBroker.Message): Promise<void> {
         if (this._client) {
             const queriesString = msg.message.query || msg.message;
 
@@ -3361,18 +3307,10 @@ export class InfluxDBAdapter extends Adapter {
                 //parse queries to array
                 queries = queriesString.split(';');
 
-                let c = 1;
-                for (const query of queries) {
-                    if (!query || typeof query !== 'string') {
-                        throw {
-                            name: 'Exception',
-                            message: `Array element #${c}: Query messing`,
-                            toString: function () {
-                                return `${this.name}: ${this.message}`;
-                            },
-                        };
+                for (let q = 0, len = queries.length; q < len; q++) {
+                    if (!queries[q] || typeof queries[q] !== 'string') {
+                        throw new Error(`Array element #${q + 1}: Query messing`);
                     }
-                    c++;
                 }
             } catch (error) {
                 this.log.warn(`Error in received multiQuery: ${error}`);
@@ -3523,7 +3461,7 @@ export class InfluxDBAdapter extends Adapter {
     getEnabledDPs(msg: ioBroker.Message): void {
         const data: { [id: string]: InfluxDbCustomConfigTyped } = {};
         for (const id in this._influxDPs) {
-            if (this._influxDPs.hasOwnProperty(id) && this._influxDPs[id]?.config?.enabled) {
+            if (Object.prototype.hasOwnProperty.call(this._influxDPs, id) && this._influxDPs[id]?.config?.enabled) {
                 data[this._influxDPs[id].realId] = this._influxDPs[id].config;
             }
         }

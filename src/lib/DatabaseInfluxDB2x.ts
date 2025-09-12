@@ -47,7 +47,7 @@ export default class DatabaseInfluxDB2x extends Database {
         this.connect();
     }
 
-    connect() {
+    connect(): void {
         const url = `${this.protocol}://${this.host}:${this.port}/${this.path || ''}`;
 
         this.log.debug(`Connect InfluxDB2: ${url} [${this.database}]`);
@@ -67,7 +67,7 @@ export default class DatabaseInfluxDB2x extends Database {
         this.deleteApi = new InfluxClientApis.DeleteAPI(this.connection);
     }
 
-    getHostsAvailable() {
+    getHostsAvailable(): number {
         return 1; // always one host with InfluxDB 2.x
     }
 
@@ -134,7 +134,7 @@ export default class DatabaseInfluxDB2x extends Database {
     async applyRetentionPolicyToDB(dbName: string, retention: number): Promise<void> {
         const shardGroupDuration = this.calculateShardGroupDuration(retention);
         this.log.info(
-            `Applying retention policy for ${dbName} to ${!retention ? 'infinity' : retention + ' seconds'}. Shard Group Duration (calculated): ${shardGroupDuration} seconds`,
+            `Applying retention policy for ${dbName} to ${!retention ? 'infinity' : `${retention} seconds`}. Shard Group Duration (calculated): ${shardGroupDuration} seconds`,
         );
         await this.bucketsApi.patchBucketsID({
             bucketID: this.bucketIds[dbName],

@@ -41,7 +41,13 @@ export default class DatabaseInfluxDB1x extends Database {
         });
     }
 
-    deleteData(start: Date | number, stop: Date | number, org: string, dbName: string, query: string): Promise<void> {
+    deleteData(
+        _start: Date | number,
+        _stop: Date | number,
+        _org: string,
+        _dbName: string,
+        _query: string,
+    ): Promise<void> {
         throw new Error('Method not implemented.');
     }
 
@@ -49,7 +55,7 @@ export default class DatabaseInfluxDB1x extends Database {
         return Promise.resolve('fields');
     }
 
-    getHostsAvailable() {
+    getHostsAvailable(): number {
         return 1;
     }
 
@@ -119,8 +125,8 @@ export default class DatabaseInfluxDB1x extends Database {
         oldRetention ||= { name: null, time: undefined };
 
         // Get the name of currently active default policy first, to update only it.
-        // Excodibur: As for new DBs Influx 1 creates "autogen" policy by default, is is unlikely that there is a scenario
-        //            where the policy needs to be CREATEd from scratch, since there is always one set. Just keeping it in
+        // Excodibur: As for new DBs Influx 1 creates "autogen" policy by default, is unlikely that there is a scenario
+        //            where the policy needs to be CREATEd from scratch, since there is always one set. Just keep it in
         //            here for perhaps unknown config-scenarios.
         const command = oldRetention.name ? 'ALTER' : 'CREATE';
         this.log.debug(`Retention policy will be ${command}ed`);
@@ -128,7 +134,7 @@ export default class DatabaseInfluxDB1x extends Database {
         const retentionName = oldRetention.name ? oldRetention.name : 'global';
 
         this.log.info(
-            `Applying retention policy (${retentionName}) for ${dbname} to ${retention === 0 ? 'infinity' : retention + ' seconds'}. Shard Duration: ${shardDuration} seconds`,
+            `Applying retention policy (${retentionName}) for ${dbname} to ${retention === 0 ? 'infinity' : `${retention} seconds`}. Shard Duration: ${shardDuration} seconds`,
         );
         await this.connection!.query(
             `${command} RETENTION POLICY "${retentionName}" ON "${dbname}" DURATION ${retention}s REPLICATION 1 SHARD DURATION ${shardDuration}s DEFAULT`,
