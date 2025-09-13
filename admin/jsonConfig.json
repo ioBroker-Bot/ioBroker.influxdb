@@ -13,6 +13,33 @@
                     "help": "docker_explanation",
                     "xs": 12
                 },
+                "stopDockerIfInstanceStopped": {
+                    "type": "checkbox",
+                    "label": "Stop InfluxDB Docker container when instance stops",
+                    "help": "stop_docker_explanation",
+                    "hidden": "!data.useDocker",
+                    "xs": 12
+                },
+                "dockerPort": {
+                    "newLine": true,
+                    "type": "number",
+                    "label": "InfluxDB Docker Port",
+                    "help": "The port on which the InfluxDB Docker container will be reachable on localhost",
+                    "min": 1,
+                    "max": 65565,
+                    "default": 8086,
+                    "hidden": "!data.useDocker",
+                    "sm": 12,
+                    "md": 4
+                },
+                "dockerAutoImageUpdate": {
+                    "type": "checkbox",
+                    "label": "Auto-update InfluxDB Docker image",
+                    "help": "If enabled, the latest InfluxDB Docker image will be pulled when the adapter starts.",
+                    "hidden": "!data.useDocker",
+                    "sm": 12,
+                    "md": 8
+                },
                 "dbversion": {
                     "newLine": true,
                     "type": "select",

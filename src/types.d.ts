@@ -177,6 +177,7 @@ export interface InfluxDBAdapterConfig {
     useDocker: boolean;
     stopDockerIfInstanceStopped: boolean;
     dockerPort: number | string;
+    dockerAutoImageUpdate: boolean;
 }
 
 export interface InfluxDbCustomConfig {

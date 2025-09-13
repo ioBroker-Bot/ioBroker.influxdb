@@ -514,7 +514,7 @@ export class InfluxDBAdapter extends Adapter {
                 const influxDockerConfig: ContainerConfig = this.getDockerConfig(config);
                 if (!this.dockerManager) {
                     dockerCreated = true;
-                    influxDockerConfig.stopOnUnload = true;
+                    influxDockerConfig.iobStopOnUnload = true;
                     influxDockerConfig.removeOnExit = true;
                     this.dockerManager = new DockerManager(this, [influxDockerConfig]);
                 }
@@ -869,7 +869,10 @@ export class InfluxDBAdapter extends Adapter {
         this.subscribeForeignObjects('*');
 
         if (this.config.useDocker) {
-            const influxDockerConfig: ContainerConfig = this.getDockerConfig(this.config);
+            const influxDockerConfig: ContainerConfig = this.getDockerConfig(
+                this.config,
+                this.config.dockerAutoImageUpdate,
+            );
             this.dockerManager = new DockerManager(this, [influxDockerConfig]);
         }
 
@@ -884,11 +887,7 @@ export class InfluxDBAdapter extends Adapter {
         }
     }
 
-    getDockerConfig(config: InfluxDBAdapterConfig): ContainerConfig {
-        this.config.dbversion = '2.x';
-        this.config.dockerPort = parseInt(this.config.dockerPort as string, 10) || 8086;
-        this.config.protocol = 'http';
-        this.dockerFolder = join(getAbsoluteDefaultDataDir(), this.namespace);
+    getDockerConfig(config: InfluxDBAdapterConfig, dockerAutoImageUpdate?: boolean): ContainerConfig {
         // docker run -d -p 8086:8086 \
         //   -v $PWD/data:/var/lib/influxdb2 \
         //   -v $PWD/config:/etc/influxdb2 \
@@ -902,17 +901,10 @@ export class InfluxDBAdapter extends Adapter {
         config.dockerPort = parseInt(config.dockerPort as string, 10) || 8086;
         config.protocol = 'http';
         this.dockerFolder = join(getAbsoluteDefaultDataDir(), this.namespace);
-        // docker run -d -p 8086:8086 \
-        //   -v $PWD/data:/var/lib/influxdb2 \
-        //   -v $PWD/config:/etc/influxdb2 \
-        //   -e DOCKER_INFLUXDB_INIT_MODE=setup \
-        //   -e DOCKER_INFLUXDB_INIT_USERNAME=my-user \
-        //   -e DOCKER_INFLUXDB_INIT_PASSWORD=my-password \
-        //   -e DOCKER_INFLUXDB_INIT_ORG=my-org \
-        //   -e DOCKER_INFLUXDB_INIT_BUCKET=my-bucket \
-        //   influxdb:2
         const influxDockerConfig: ContainerConfig = {
-            enabled: true,
+            iobEnabled: true,
+            iobMonitoringEnabled: true,
+            iobAutoImageUpdate: !!dockerAutoImageUpdate,
             // influxdb image: https://hub.docker.com/_/influxdb. Only version 2 is supported
             image: 'influxdb:2',
             name: `iobroker_${this.namespace}`,
