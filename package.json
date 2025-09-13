@@ -52,7 +52,6 @@
     "scripts": {
         "prepublishOnly": "npm run build",
         "test": "node node_modules/mocha/bin/mocha --exit",
-        "build:lang": "gulp adminWords2languages",
         "release": "release-script",
         "release-patch": "release-script patch --yes",
         "release-minor": "release-script minor --yes",
