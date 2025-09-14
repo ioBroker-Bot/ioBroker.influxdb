@@ -16,45 +16,28 @@ const adapterShortName = setup.adapterName.substring(setup.adapterName.indexOf('
 let now;
 
 function checkConnectionOfAdapter(cb, counter) {
-    counter = counter || 0;
+    counter ||= 0;
     console.log(`Try check #${counter}`);
     if (counter > 30) {
-        cb && cb('Cannot check connection');
+        cb?.('Cannot check connection');
         return;
     }
 
     console.log(`Checking alive key for key : ${adapterShortName}`);
     states.getState(`system.adapter.${adapterShortName}.0.alive`, (err, state) => {
-        err && console.error(err);
-        if (state && state.val) {
-            cb && cb();
+        if (err) {
+            console.error(err);
+        }
+        if (state?.val) {
+            cb?.();
         } else {
             setTimeout(() => checkConnectionOfAdapter(cb, counter + 1), 1000);
         }
     });
 }
 
-function checkValueOfState(id, value, cb, counter) {
-    counter = counter || 0;
-    if (counter > 20) {
-        cb && cb(`Cannot check value Of State ${id}`);
-        return;
-    }
-
-    states.getState(id, (err, state) => {
-        err && console.error(err);
-        if (value === null && !state) {
-            cb && cb();
-        } else if (state && (value === undefined || state.val === value)) {
-            cb && cb();
-        } else {
-            setTimeout(() => checkValueOfState(id, value, cb, counter + 1), 500);
-        }
-    });
-}
-
 function sendTo(target, command, message, callback) {
-    onStateChanged = function (id, state) {
+    onStateChanged = (id, state) => {
         if (id === 'messagebox.system.adapter.test.0') {
             callback(state.message);
         }
@@ -245,8 +228,8 @@ describe(`Test ${adapterShortName} adapter`, function () {
                 return done();
             }
 
-            setTimeout(function () {
-                let query = 'SHOW FIELD KEYS FROM "influxdb.0.testValue"';
+            setTimeout(() => {
+                const query = 'SHOW FIELD KEYS FROM "influxdb.0.testValue"';
                 sendTo('influxdb.0', 'query', query, result => {
                     console.log(`result: ${JSON.stringify(result.result, null, 2)}`);
                     let found = false;

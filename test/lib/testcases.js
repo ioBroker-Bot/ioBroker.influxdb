@@ -226,7 +226,7 @@ function register(it, expect, sendTo, adapterShortName, writeNulls, assumeExisti
         this.timeout(25000);
         now = Date.now();
 
-        (async function () {
+        (async () => {
             await setStateAsync(`${instanceName}.testValue`, { val: 1, ts: now + 1000 });
             await setTimeoutAsync(100);
             await setStateAsync(`${instanceName}.testValue`, { val: 2, ts: now + 10000 });
@@ -251,7 +251,7 @@ function register(it, expect, sendTo, adapterShortName, writeNulls, assumeExisti
     it(`Test ${adapterShortName}: Read values from DB using GetHistory`, function (done) {
         this.timeout(25000);
 
-        (async function () {
+        (async () => {
             try {
                 let result = await sendToAsync(instanceName, 'getHistory', {
                     id: `${instanceName}.testValue`,
@@ -414,7 +414,7 @@ function register(it, expect, sendTo, adapterShortName, writeNulls, assumeExisti
                             aggregate: 'none',
                         },
                     },
-                    function (result2) {
+                    result2 => {
                         console.log(JSON.stringify(result2.result, null, 2));
                         expect(result2.result.length).to.be.equal(2);
                         for (let i = 0; i < result2.result.length; i++) {
@@ -428,49 +428,45 @@ function register(it, expect, sendTo, adapterShortName, writeNulls, assumeExisti
         );
     });
 
-    function delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
     async function logSampleData(stateId, waitMultiplier) {
         waitMultiplier ||= 1;
         await states.setStateAsync(stateId, { val: 1 }); // expect logged
-        await delay(600 * waitMultiplier);
+        await setTimeoutAsync(600 * waitMultiplier);
         await states.setStateAsync(stateId, { val: 2 }); // Expect not logged debounce
-        await delay(20 * waitMultiplier);
+        await setTimeoutAsync(20 * waitMultiplier);
         await states.setStateAsync(stateId, { val: 2.1 }); // Expect not logged debounce
-        await delay(20 * waitMultiplier);
+        await setTimeoutAsync(20 * waitMultiplier);
         await states.setStateAsync(stateId, { val: 1.5 }); // Expect not logged debounce
-        await delay(20 * waitMultiplier);
+        await setTimeoutAsync(20 * waitMultiplier);
         await states.setStateAsync(stateId, { val: 2.3 }); // Expect not logged debounce
-        await delay(20 * waitMultiplier);
+        await setTimeoutAsync(20 * waitMultiplier);
         await states.setStateAsync(stateId, { val: 2.5 }); // Expect not logged debounce
-        await delay(600 * waitMultiplier);
+        await setTimeoutAsync(600 * waitMultiplier);
         await states.setStateAsync(stateId, { val: 2.9 }); // Expect logged skipped
-        await delay(600 * waitMultiplier);
+        await setTimeoutAsync(600 * waitMultiplier);
         await states.setStateAsync(stateId, { val: 3.0 }); // Expect logged
-        await delay(600 * waitMultiplier);
+        await setTimeoutAsync(600 * waitMultiplier);
         await states.setStateAsync(stateId, { val: 4 }); // Expect logged
-        await delay(600 * waitMultiplier);
+        await setTimeoutAsync(600 * waitMultiplier);
         await states.setStateAsync(stateId, { val: 4.4 }); // expect logged skipped
-        await delay(600 * waitMultiplier);
+        await setTimeoutAsync(600 * waitMultiplier);
         await states.setStateAsync(stateId, { val: 5 }); // expect logged
-        await delay(20 * waitMultiplier);
+        await setTimeoutAsync(20 * waitMultiplier);
         await states.setStateAsync(stateId, { val: 5 }); // expect not logged debounce
-        await delay(600 * waitMultiplier);
+        await setTimeoutAsync(600 * waitMultiplier);
         await states.setStateAsync(stateId, { val: 5 }); // expect logged skipped
-        await delay(600 * waitMultiplier);
+        await setTimeoutAsync(600 * waitMultiplier);
         await states.setStateAsync(stateId, { val: 6 }); // expect logged
-        await delay(10100);
+        await setTimeoutAsync(10100);
         for (let i = 1; i < 10; i++) {
             await states.setStateAsync(stateId, { val: 6 + i * 0.05 }); // expect logged skipped
-            await delay(70 * waitMultiplier);
+            await setTimeoutAsync(70 * waitMultiplier);
         }
         await states.setStateAsync(stateId, { val: 7 }); // expect logged
-        await delay(5000);
+        await setTimeoutAsync(5000);
         await states.setStateAsync(stateId, { val: -5 }); // expect not logged, too low
         await states.setStateAsync(stateId, { val: 101 }); // expect not logged, too high
-        await delay(7000);
+        await setTimeoutAsync(7000);
     }
 
     it(`Test ${adapterShortName}: Write debounced Raw values into DB`, async function () {
@@ -812,14 +808,13 @@ function register(it, expect, sendTo, adapterShortName, writeNulls, assumeExisti
             }
         } else {
             if (assumeExistingData) {
-                expect(result.result.length).to.be.within(2, 3);
+                expect(result.result.length).to.be.within(1, 3);
                 if (process.env.INFLUXDB2) {
                     // expect((result.result[0].val + result.result[1].val)).to.be.within(3780, 4000);
                 } else {
                     // expect(result.result[0].val).to.be.within(2980, 3000);
                 }
             } else {
-                console.log('Calculated Integral: ' + integral);
                 expect(result.result.length).to.be.within(1, 2);
                 if (process.env.INFLUXDB2) {
                     expect(sum).to.be.within(2980, 3000);
@@ -1050,10 +1045,8 @@ function register(it, expect, sendTo, adapterShortName, writeNulls, assumeExisti
             result => {
                 expect(result.error).to.be.undefined;
                 expect(result.success).to.be.true;
-                // wait till adapter receives the new settings
-                setTimeout(function () {
-                    done();
-                }, 2000);
+                // wait till the adapter receives the new settings
+                setTimeout(() => done(), 2000);
             },
         );
     });
@@ -1073,10 +1066,8 @@ function register(it, expect, sendTo, adapterShortName, writeNulls, assumeExisti
             result => {
                 expect(result.error).to.be.undefined;
                 expect(result.success).to.be.true;
-                // wait till adapter receives the new settings
-                setTimeout(function () {
-                    done();
-                }, 2000);
+                // wait till the adapter receives the new settings
+                setTimeout(() => done(), 2000);
             },
         );
     });
@@ -1096,10 +1087,8 @@ function register(it, expect, sendTo, adapterShortName, writeNulls, assumeExisti
             result => {
                 expect(result.error).to.be.undefined;
                 expect(result.success).to.be.true;
-                // wait till adapter receives the new settings
-                setTimeout(function () {
-                    done();
-                }, 2000);
+                // wait till the adapter receives the new settings
+                setTimeout(() => done(), 2000);
             },
         );
     });

@@ -34,27 +34,8 @@ function checkConnectionOfAdapter(cb, counter) {
     });
 }
 
-function checkValueOfState(id, value, cb, counter) {
-    counter = counter || 0;
-    if (counter > 20) {
-        cb && cb(`Cannot check value Of State ${id}`);
-        return;
-    }
-
-    states.getState(id, (err, state) => {
-        err && console.error(err);
-        if (value === null && !state) {
-            cb && cb();
-        } else if (state && (value === undefined || state.val === value)) {
-            cb && cb();
-        } else {
-            setTimeout(() => checkValueOfState(id, value, cb, counter + 1), 500);
-        }
-    });
-}
-
 function sendTo(target, command, message, callback) {
-    onStateChanged = function (id, state) {
+    onStateChanged = (id, state) => {
         if (id === 'messagebox.system.adapter.test.0') {
             callback(state.message);
         }
@@ -244,7 +225,7 @@ describe(`Test ${adapterShortName} adapter`, function () {
             return done();
         }
 
-        setTimeout(function () {
+        setTimeout(() => {
             let query = 'SHOW FIELD KEYS FROM "influxdb.0.testValue"';
             sendTo('influxdb.0', 'query', query, result => {
                 console.log(`result: ${JSON.stringify(result.result, null, 2)}`);
