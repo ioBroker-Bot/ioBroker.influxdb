@@ -1161,7 +1161,11 @@ export class InfluxDBAdapter extends Adapter {
                         this.log.debug(
                             `Skipped value logged ${id}, value=${this._influxDPs[id].skipped.val}, ts=${this._influxDPs[id].skipped.ts}`,
                         );
-                    await this.pushHelper(id, this._influxDPs[id].skipped);
+                    try {
+                        await this.pushHelper(id, this._influxDPs[id].skipped);
+                    } catch (e) {
+                        this.log.warn(`Cannot push skipped value: ${e}`);
+                    }
                     this._influxDPs[id].skipped = null;
                 }
                 if (
@@ -1187,7 +1191,7 @@ export class InfluxDBAdapter extends Adapter {
                             this.log.debug(
                                 `Value logged ${id}, value=${this._influxDPs[id].state.val}, ts=${this._influxDPs[id].state.ts}`,
                             );
-                        void this.pushHelper(id);
+                        void this.pushHelper(id).catch(e => this.log.warn(e));
                         if (settings.changesOnly && settings.changesRelogInterval > 0) {
                             this._influxDPs[id].relogTimeout = setTimeout(
                                 _id => this.reLogHelper(_id),
@@ -1211,7 +1215,7 @@ export class InfluxDBAdapter extends Adapter {
                         `Value logged ${id}, value=${this._influxDPs[id].state!.val}, ts=${this._influxDPs[id].state!.ts}`,
                     );
                 }
-                void this.pushHelper(id, state);
+                void this.pushHelper(id, state).catch(e => this.log.warn(e));
                 if (settings.changesOnly && settings.changesRelogInterval > 0) {
                     this._influxDPs[id].relogTimeout = setTimeout(
                         _id => this.reLogHelper(_id),
@@ -2360,9 +2364,13 @@ export class InfluxDBAdapter extends Adapter {
                 this._influxDPs[id].timeout = null;
             }
 
-            if (this._influxDPs[id].skipped && !this._influxDPs[id].disableSkippedValueLogging) {
-                await this.pushHelper(id, this._influxDPs[id].skipped);
-                this._influxDPs[id].skipped = null;
+            try {
+                if (this._influxDPs[id].skipped && !this._influxDPs[id].disableSkippedValueLogging) {
+                    await this.pushHelper(id, this._influxDPs[id].skipped);
+                    this._influxDPs[id].skipped = null;
+                }
+            } catch (error) {
+                this.log.warn(`Error by bush: ${error}`);
             }
         }
 
