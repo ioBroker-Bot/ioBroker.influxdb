@@ -1,4 +1,4 @@
-import { InfluxDB, type IPoint } from 'influx';
+import { InfluxDB, type IPoint, escape } from 'influx';
 import { Database, type ValuesForInflux } from './Database';
 
 export default class DatabaseInfluxDB1x extends Database {
@@ -14,7 +14,6 @@ export default class DatabaseInfluxDB1x extends Database {
             protocol: 'http' | 'https';
             database: string;
             requestTimeout: number;
-            timePrecision: 'ns' | 'us' | 'ms' | 's';
         },
         db1xOptions: {
             username: string;
@@ -161,10 +160,24 @@ export default class DatabaseInfluxDB1x extends Database {
         for (const seriesId in series) {
             if (Object.prototype.hasOwnProperty.call(series, seriesId)) {
                 const pointsToSend = series[seriesId];
-                for (let p = 0; p < pointsToSend.length; p++) {
+                for (const pointToSend of pointsToSend) {
+                    const fields: {
+                        [name: string]: any;
+                    } = {};
+                    Object.keys(pointToSend).forEach(key => {
+                        if (key === 'time') {
+                            return;
+                        }
+                        if (key === 'from' && !pointToSend[key as keyof ValuesForInflux]) {
+                            return;
+                        }
+                        fields[key] = pointToSend[key as keyof ValuesForInflux];
+                    });
+
                     points.push({
-                        measurement: seriesId,
-                        fields: pointsToSend[p],
+                        measurement: escape.measurement(seriesId),
+                        fields,
+                        timestamp: new Date(pointToSend.time),
                     });
                 }
             }
@@ -177,26 +190,55 @@ export default class DatabaseInfluxDB1x extends Database {
             return Promise.reject(new Error('No connection to InfluxDB'));
         }
         const points: IPoint[] = [];
-        for (let p = 0; p < pointsToSend.length; p++) {
+        for (const pointToSend of pointsToSend) {
+            const fields: {
+                [name: string]: any;
+            } = {};
+            Object.keys(pointToSend).forEach(key => {
+                if (key === 'time') {
+                    return;
+                }
+                if (key === 'from' && !pointToSend[key as keyof ValuesForInflux]) {
+                    return;
+                }
+                fields[key] = pointToSend[key as keyof ValuesForInflux];
+            });
             points.push({
-                measurement: seriesId,
-                fields: pointsToSend[p],
+                measurement: escape.measurement(seriesId),
+                fields,
+                timestamp: new Date(pointToSend.time),
             });
         }
 
         await this.connection.writePoints(points);
     }
 
-    async writePoint(seriesName: string, value: ValuesForInflux): Promise<void> {
+    async writePoint(seriesId: string, pointToSend: ValuesForInflux): Promise<void> {
         if (!this.connection) {
             return Promise.reject(new Error('No connection to InfluxDB'));
         }
-        await this.connection.writePoints([
-            {
-                measurement: seriesName,
-                fields: value,
-            },
-        ]);
+        const fields: {
+            [name: string]: any;
+        } = {};
+        Object.keys(pointToSend).forEach(key => {
+            if (key === 'time') {
+                return;
+            }
+            if (key === 'from' && !pointToSend[key as keyof ValuesForInflux]) {
+                return;
+            }
+            fields[key] = pointToSend[key as keyof ValuesForInflux];
+        });
+        await this.connection.writePoints(
+            [
+                {
+                    measurement: escape.measurement(seriesId),
+                    fields,
+                    timestamp: new Date(pointToSend.time),
+                },
+            ],
+            { precision: 'ms' },
+        );
     }
 
     async query<T>(query: string): Promise<Array<T & { time: Date }>> {

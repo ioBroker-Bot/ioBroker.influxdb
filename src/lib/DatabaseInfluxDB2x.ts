@@ -27,7 +27,6 @@ export default class DatabaseInfluxDB2x extends Database {
             protocol: 'http' | 'https';
             database: string;
             requestTimeout: number;
-            timePrecision: 'ns' | 'us' | 'ms' | 's';
         },
         db2xOptions: {
             path: string;
@@ -60,7 +59,7 @@ export default class DatabaseInfluxDB2x extends Database {
         });
 
         this.queryApi = this.connection.getQueryApi(this.organization);
-        this.writeApi = this.connection.getWriteApi(this.organization, this.database, this.timePrecision);
+        this.writeApi = this.connection.getWriteApi(this.organization, this.database, 'ms');
         this.bucketsApi = new BucketsAPI(this.connection);
         this.orgsApi = new OrgsAPI(this.connection);
         this.healthApi = new HealthAPI(this.connection);

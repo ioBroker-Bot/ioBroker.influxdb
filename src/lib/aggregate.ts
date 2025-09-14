@@ -11,9 +11,6 @@ import type { GetHistoryOptions, InternalHistoryOptions, IobDataEntry, TimeInter
  * |    |###############|
  * +----o---------------n--->time
  * Square is the #, deltaT = x2 - x1, DeltaY = y2 - y1
- *
- * @param oldVal
- * @param newVal
  */
 export function calcDiff(
     oldVal: IobDataEntry,
@@ -49,11 +46,13 @@ function interpolate2points(p1: IobDataEntry, p2: IobDataEntry, ts: number): num
 
 export function initAggregate(
     initialOptions: GetHistoryOptions,
+    id?: string,
     timeIntervals?: TimeInterval[],
     log?: (text: string) => void,
 ): InternalHistoryOptions {
     const options: InternalHistoryOptions = initialOptions as InternalHistoryOptions;
     options.log = log;
+    options.id = id; // id is needed for because of addId option
     if (!options.log) {
         options.log = () => {};
         // To save the complex outputs
@@ -273,13 +272,7 @@ export function aggregation(
     return { processing: options.processing!, step: options.step!, sourceLength: data.length };
 }
 
-/**
- * Execute logic for every entry in the initial series array
- *
- * @param data
- * @param index
- * @param options
- */
+/** Execute logic for every entry in the initial series array */
 function aggregationLogic(data: IobDataEntry, index: number, options: InternalHistoryOptions): void {
     if (!options.processing || !options.processing[index]) {
         if (options.logDebug && options.log) {
@@ -1283,7 +1276,7 @@ export function beautify(options: InternalHistoryOptions): void {
         }
     }
 
-    if (options.addId && options.result) {
+    if (options.addId && options.result && options.id) {
         for (let i = 0; i < options.result.length; i++) {
             if (!options.result[i].id && options.id) {
                 options.result[i].id = options.id;
@@ -1292,9 +1285,21 @@ export function beautify(options: InternalHistoryOptions): void {
     }
 }
 
+/**
+ * Sends the history to the caller
+ *
+ * @param adapter Adapter instance
+ * @param msg ioBroker message to respond to
+ * @param id State ID
+ * @param initialOptions get history options
+ * @param dataOrError Array or error string
+ * @param startTime Start time of the request just to measure duration
+ * @param logId Optional log ID to prefix log messages
+ */
 export function sendResponse(
     adapter: ioBroker.Adapter,
     msg: ioBroker.Message,
+    id: string | undefined,
     initialOptions: GetHistoryOptions,
     dataOrError: IobDataEntry[] | string,
     startTime: number,
@@ -1324,23 +1329,26 @@ export function sendResponse(
         };
     }
 
-    if (initialOptions.count && !initialOptions.start && dataOrError.length > initialOptions.count) {
-        dataOrError.splice(0, dataOrError.length - initialOptions.count);
+    // We now know that dataOrError is IobDataEntry[]
+    const data = dataOrError;
+
+    if (initialOptions.count && !initialOptions.start && data.length > initialOptions.count) {
+        data.splice(0, data.length - initialOptions.count);
     }
-    if (dataOrError[0]) {
+    if (data[0]) {
         let result: IobDataEntry[];
-        initialOptions.start = initialOptions.start || dataOrError[0].ts;
+        initialOptions.start ||= data[0].ts;
 
         let step = initialOptions.step || 0;
-        const sourceLength = dataOrError.length;
+        const sourceLength = data.length;
         if (!initialOptions.aggregate || initialOptions.aggregate === 'none' || initialOptions.preAggregated) {
-            const options: InternalHistoryOptions = initAggregate(initialOptions, undefined, log);
-            options.result = dataOrError;
+            const options: InternalHistoryOptions = initAggregate(initialOptions, id, undefined, log);
+            options.result = data;
             step = 0;
             // convert ack from 0/1 to false/true
             if (initialOptions.ack) {
-                for (let i = 0; i < dataOrError.length; i++) {
-                    dataOrError[i].ack = !!dataOrError[i].ack;
+                for (let i = 0; i < data.length; i++) {
+                    data[i].ack = !!data[i].ack;
                 }
             }
             beautify(options);
@@ -1349,14 +1357,18 @@ export function sendResponse(
                 options.result.splice(0, options.result.length - options.count);
             }
             result = options.result;
+            adapter.log.debug(
+                `Send with no aggregation: ${result.length} of: ${sourceLength} in: ${Date.now() - startTime}ms`,
+            );
         } else {
-            const options: InternalHistoryOptions = initAggregate(initialOptions, undefined, log);
-            aggregation(options, dataOrError);
+            const options: InternalHistoryOptions = initAggregate(initialOptions, id, undefined, log);
+            aggregation(options, data);
             finishAggregation(options);
             result = options.result!;
+            adapter.log.debug(
+                `Send after aggregation: ${result.length} of: ${sourceLength} in: ${Date.now() - startTime}ms`,
+            );
         }
-
-        adapter.log.debug(`Send: ${result.length} of: ${sourceLength} in: ${Date.now() - startTime}ms`);
 
         adapter.sendTo(
             msg.from,
@@ -1364,7 +1376,6 @@ export function sendResponse(
             {
                 result,
                 step,
-                error: null,
                 sessionId: initialOptions.sessionId,
             },
             msg.callback,
@@ -1374,7 +1385,7 @@ export function sendResponse(
         adapter.sendTo(
             msg.from,
             msg.command,
-            { result: [], step: null, error: null, sessionId: initialOptions.sessionId },
+            { result: [], step: null, sessionId: initialOptions.sessionId },
             msg.callback,
         );
     }
@@ -1460,24 +1471,10 @@ export function sendResponseCounter(
             }
         }
 
-        adapter.sendTo(
-            msg.from,
-            msg.command,
-            {
-                result: sum,
-                error: null,
-                sessionId: options.sessionId,
-            },
-            msg.callback,
-        );
+        adapter.sendTo(msg.from, msg.command, { result: sum, sessionId: options.sessionId }, msg.callback);
     } else {
         adapter.log.info('No Data');
-        adapter.sendTo(
-            msg.from,
-            msg.command,
-            { result: 0, step: null, error: null, sessionId: options.sessionId },
-            msg.callback,
-        );
+        adapter.sendTo(msg.from, msg.command, { result: 0, step: null, sessionId: options.sessionId }, msg.callback);
     }
 }
 
@@ -1526,6 +1523,7 @@ function quantile(q: number, list: number[]): number {
     return getQuantileValue(q, list);
 }
 
+/** Sort function for IobDataEntry by timestamp */
 export function sortByTs(a: IobDataEntry, b: IobDataEntry): number {
     return a.ts - b.ts;
 }

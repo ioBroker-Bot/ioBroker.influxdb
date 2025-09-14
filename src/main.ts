@@ -226,7 +226,7 @@ export class InfluxDBAdapter extends Adapter {
                     );
 
                     if (
-                        this._influxDPs[formerAliasId]?.config &&
+                        this._influxDPs[formerAliasId] &&
                         !this._influxDPs[formerAliasId].storageTypeAdjustedInternally &&
                         JSON.stringify(customSettings) === this._influxDPs[formerAliasId].config
                     ) {
@@ -247,6 +247,7 @@ export class InfluxDBAdapter extends Adapter {
                     const timeout = this._influxDPs[formerAliasId] ? this._influxDPs[formerAliasId].timeout : null;
 
                     this._influxDPs[id] = customSettings as SavedInfluxDbCustomConfig;
+                    this._influxDPs[id].config = JSON.stringify(customSettings);
                     this._influxDPs[id].realId = realId;
                     this._influxDPs[id].state = state;
                     this._influxDPs[id].skipped = skipped;
@@ -263,7 +264,7 @@ export class InfluxDBAdapter extends Adapter {
 
                     id = formerAliasId;
 
-                    if (this._influxDPs[id]?.config) {
+                    if (this._influxDPs[id]) {
                         const relogTimeout = this._influxDPs[id].relogTimeout;
                         if (relogTimeout) {
                             clearTimeout(relogTimeout);
@@ -370,7 +371,6 @@ export class InfluxDBAdapter extends Adapter {
                         protocol: this.config.protocol, // optional, default 'http'
                         database: this.config.dbname || 'iobroker',
                         requestTimeout: this.config.requestTimeout as number,
-                        timePrecision: 'ms',
                     },
                     {
                         path: this.config.path, // optional, default '/'
@@ -396,7 +396,6 @@ export class InfluxDBAdapter extends Adapter {
                         protocol: this.config.protocol, // optional, default 'http'
                         database: this.config.dbname,
                         requestTimeout: this.config.requestTimeout as number,
-                        timePrecision: 'ms',
                     },
                     {
                         username: this.config.user,
@@ -531,7 +530,6 @@ export class InfluxDBAdapter extends Adapter {
                             protocol: config.protocol, // optional, default 'http'
                             database: config.dbname || 'iobroker',
                             requestTimeout: config.requestTimeout,
-                            timePrecision: 'ms',
                         },
                         {
                             path: config.path, // optional, default '/'
@@ -552,7 +550,6 @@ export class InfluxDBAdapter extends Adapter {
                             protocol: config.protocol, // optional, default 'http'
                             database: config.dbname || 'iobroker',
                             requestTimeout: config.requestTimeout,
-                            timePrecision: 'ms',
                         },
                         {
                             username: config.user,
@@ -818,7 +815,6 @@ export class InfluxDBAdapter extends Adapter {
 
         // read all custom settings
         const doc = await this.getObjectViewAsync('system', 'custom', {});
-        let count = 0;
 
         if (doc?.rows) {
             const l = doc.rows.length;
@@ -845,8 +841,7 @@ export class InfluxDBAdapter extends Adapter {
                         this.config,
                     ) as SavedInfluxDbCustomConfig;
                     this._influxDPs[id].config = JSON.stringify(item.value[this.namespace]);
-                    count++;
-                    this.log.info(`enabled logging of ${id}, Alias=${id !== realId}, ${count} points now activated`);
+                    this.log.debug(`enabled logging of ${id}, Alias=${id !== realId} points now activated`);
 
                     this._influxDPs[id].realId = realId;
                     await this.writeInitialValue(realId, id);
@@ -855,13 +850,17 @@ export class InfluxDBAdapter extends Adapter {
         }
 
         // If we have less than 20 datapoints, subscribe individually, else subscribe to all
-        if (count < 20) {
+        if (Object.keys(this._influxDPs).length < 20) {
+            this.log.info(`subscribing to ${Object.keys(this._influxDPs).length} datapoints`);
             for (const _id in this._influxDPs) {
                 if (Object.prototype.hasOwnProperty.call(this._influxDPs, _id)) {
                     this.subscribeForeignStates(this._influxDPs[_id].realId);
                 }
             }
         } else {
+            this.log.debug(
+                `subscribing to all datapoints as we have ${Object.keys(this._influxDPs).length} datapoints to log`,
+            );
             this._subscribeAll = true;
             this.subscribeForeignStates('*');
         }
@@ -1537,7 +1536,7 @@ export class InfluxDBAdapter extends Adapter {
                 // retry write after type correction for some easy cases
                 let retry = false;
                 let adjustType = false;
-                if (this._influxDPs[pointId]?.config && !this._influxDPs[pointId].storageType) {
+                if (this._influxDPs[pointId] && !this._influxDPs[pointId].storageType) {
                     let convertDirection = '';
                     if (
                         errorText.includes('is type bool, already exists as type float') ||
@@ -2195,12 +2194,11 @@ export class InfluxDBAdapter extends Adapter {
             throw new Error(`State ${JSON.stringify(state)} for ${id} is not valid`);
         }
 
-        if (!this._influxDPs[id]?.config) {
+        if (!this._influxDPs[id]) {
             if (applyRules) {
                 throw new Error(`influxdb not enabled for ${id}, so can not apply the rules as requested`);
             }
-            this._influxDPs[id] = this._influxDPs[id] || {};
-            this._influxDPs[id].realId = id;
+            this._influxDPs[id] = { realId: id, config: '{}' } as SavedInfluxDbCustomConfig;
         }
         try {
             if (applyRules) {
@@ -2344,10 +2342,7 @@ export class InfluxDBAdapter extends Adapter {
                 this._influxDPs[id].timeout = null;
             }
 
-            if (
-                this._influxDPs[id].skipped &&
-                !(this._influxDPs[id].config && this._influxDPs[id].disableSkippedValueLogging)
-            ) {
+            if (this._influxDPs[id].skipped && !this._influxDPs[id].disableSkippedValueLogging) {
                 await this.pushHelper(id, this._influxDPs[id].skipped);
                 this._influxDPs[id].skipped = null;
             }
@@ -2380,7 +2375,7 @@ export class InfluxDBAdapter extends Adapter {
             return;
         }
         const logId = (msg.message.id ? msg.message.id : 'all') + Date.now() + Math.random();
-        let id = msg.message.id === '*' ? null : msg.message.id;
+        let id: string | undefined = msg.message.id === '*' ? undefined : msg.message.id;
 
         const options: GetHistoryOptions = {
             start: msg.message.options.start,
@@ -2477,8 +2472,12 @@ export class InfluxDBAdapter extends Adapter {
             options.round = this.config.round as number;
         }
 
-        this._influxDPs[id] = this._influxDPs[id] || {};
-        const debugLog = !!this._influxDPs[id]?.enableDebugLogs || this.config.enableDebugLogs;
+        if (id) {
+            this._influxDPs[id] ||= {} as SavedInfluxDbCustomConfig;
+            this._influxDPs[id].enableDebugLogs = !!msg.message.options.enableDebugLogs;
+            this._influxDPs[id].config ||= '{}';
+        }
+        const debugLog = (id && !!this._influxDPs[id]?.enableDebugLogs) || this.config.enableDebugLogs;
 
         if (id && this._aliasMap[id]) {
             id = this._aliasMap[id];
@@ -2644,6 +2643,7 @@ export class InfluxDBAdapter extends Adapter {
                         Aggregate.sendResponse(
                             this as unknown as ioBroker.Adapter,
                             msg,
+                            id,
                             options,
                             'Database no longer connected',
                             startTime,
@@ -2667,12 +2667,49 @@ export class InfluxDBAdapter extends Adapter {
                             this.log.debug(`${logId} Response rows: ${JSON.stringify(rows)}`);
                         }
 
-                        let result: IobDataEntry[] = [];
+                        const result: IobDataEntry[] = [];
 
                         if (rows?.length) {
                             for (let qr = 0; qr < rows.length; qr++) {
-                                for (let rr = 0; rr < rows[qr].length; rr++) {
-                                    const storedItem = rows[qr][rr];
+                                if (Array.isArray(rows[qr])) {
+                                    for (let rr = 0; rr < rows[qr].length; rr++) {
+                                        const storedItem = rows[qr][rr];
+                                        const item: IobDataEntry = {
+                                            ts: 0,
+                                            val: null,
+                                        };
+                                        if (storedItem.val !== undefined) {
+                                            item.val = storedItem.val;
+                                        } else if (storedItem.value !== undefined) {
+                                            item.val = storedItem.value!;
+                                        }
+                                        if (storedItem.time) {
+                                            item.ts = new Date(storedItem.time).getTime();
+                                        } else if (storedItem.ts) {
+                                            item.ts = new Date(storedItem.ts).getTime();
+                                        }
+                                        if (storedItem.from) {
+                                            item.from = storedItem.from;
+                                        }
+                                        if (storedItem.ack !== undefined) {
+                                            item.ack = storedItem.ack;
+                                        }
+                                        if (storedItem.q !== undefined) {
+                                            item.q = storedItem.q;
+                                        }
+                                        result.push(item);
+                                    }
+                                } else {
+                                    // rows[qr] is already a value
+                                    const storedItem = rows[qr] as unknown as {
+                                        val: number;
+                                        value?: number;
+                                        time: number;
+                                        ts?: number;
+                                        q: number;
+                                        from: string;
+                                        ack: boolean;
+                                    };
                                     const item: IobDataEntry = {
                                         ts: 0,
                                         val: null,
@@ -2696,20 +2733,17 @@ export class InfluxDBAdapter extends Adapter {
                                     if (storedItem.q !== undefined) {
                                         item.q = storedItem.q;
                                     }
-
-                                    if (options.addId) {
-                                        item.id = id;
-                                    }
                                     result.push(item);
                                 }
                             }
-                            result = result.sort(sortByTs);
+                            result.sort(sortByTs);
                         }
 
                         try {
                             Aggregate.sendResponse(
                                 this as unknown as ioBroker.Adapter,
                                 msg,
+                                id,
                                 options,
                                 result,
                                 startTime,
@@ -2718,6 +2752,7 @@ export class InfluxDBAdapter extends Adapter {
                             Aggregate.sendResponse(
                                 this as unknown as ioBroker.Adapter,
                                 msg,
+                                id,
                                 options,
                                 e.toString(),
                                 startTime,
@@ -2731,6 +2766,7 @@ export class InfluxDBAdapter extends Adapter {
                         Aggregate.sendResponse(
                             this as unknown as ioBroker.Adapter,
                             msg,
+                            id,
                             options,
                             extractError(error),
                             startTime,
@@ -2792,7 +2828,7 @@ export class InfluxDBAdapter extends Adapter {
             removeBorderValues: msg.message.options.removeBorderValues || false,
         };
         const logId = (msg.message.id ? msg.message.id : 'all') + Date.now() + Math.random();
-        let id = msg.message.id === '*' ? null : msg.message.id;
+        let id: string | undefined = msg.message.id === '*' ? undefined : msg.message.id;
 
         this.log.debug(`${logId} getHistory message: ${JSON.stringify(msg.message)}`);
 
@@ -2853,8 +2889,12 @@ export class InfluxDBAdapter extends Adapter {
             options.round = this.config.round as number;
         }
 
-        this._influxDPs[id] = this._influxDPs[id] || {};
-        const debugLog = !!this._influxDPs[id]?.enableDebugLogs || this.config.enableDebugLogs;
+        if (id) {
+            this._influxDPs[id] ||= {} as SavedInfluxDbCustomConfig;
+            this._influxDPs[id].enableDebugLogs = !!msg.message.options.enableDebugLogs;
+            this._influxDPs[id].config ||= '{}';
+        }
+        const debugLog = (id && !!this._influxDPs[id]?.enableDebugLogs) || this.config.enableDebugLogs;
 
         if (id && this._aliasMap[id]) {
             id = this._aliasMap[id];
@@ -2930,10 +2970,10 @@ export class InfluxDBAdapter extends Adapter {
                     try {
                         const result = await this._client?.query<{ error?: string }>(booleanTypeCheckQuery);
                         // If shutdown in between
-                        if (!this._influxDPs[id]) {
+                        if (id && !this._influxDPs[id]) {
                             return;
                         }
-                        if (this._influxDPs[id]?.storageType && this._influxDPs[id].storageType !== 'Number') {
+                        if (id && this._influxDPs[id]?.storageType && this._influxDPs[id].storageType !== 'Number') {
                             supportsAggregates = false;
                         } else {
                             if (debugLog) {
@@ -2963,7 +3003,7 @@ export class InfluxDBAdapter extends Adapter {
                         }
                     }
 
-                    if (supportsAggregates) {
+                    if (supportsAggregates && id) {
                         const config = this._influxDPs[id];
                         if (config?.state && typeof config.state.val !== 'number') {
                             supportsAggregates = false;
@@ -3063,19 +3103,19 @@ export class InfluxDBAdapter extends Adapter {
                         if (options.start) {
                             // get one entry "before" the defined timeframe for displaying purposes
                             addFluxQuery = `from(bucket: "${this.config.dbname}") 
-                    |> range(start: ${new Date(options.start - ((this.config.retention as number) || 31536000) * 1000).toISOString()}, stop: ${new Date(options.start - 1).toISOString()}) 
-                    |> filter(fn: (r) => r["_measurement"] == "${id}") 
-                    |> last()
-                    ${!this.config.usetags ? '|> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")' : ''}`;
+|> range(start: ${new Date(options.start - ((this.config.retention as number) || 31536000) * 1000).toISOString()}, stop: ${new Date(options.start - 1).toISOString()}) 
+|> filter(fn: (r) => r["_measurement"] == "${id}") 
+|> last()
+${!this.config.usetags ? '|> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")' : ''}`;
 
                             fluxQueries.unshift(addFluxQuery);
                         }
                         // get one entry "after" the defined timeframe for displaying purposes
                         addFluxQuery = `from(bucket: "${this.config.dbname}") 
-                    |> range(start: ${new Date(options.end! + 1).toISOString()}) 
-                    |> filter(fn: (r) => r["_measurement"] == "${id}") 
-                    |> first()
-                    ${!this.config.usetags ? '|> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")' : ''}`;
+|> range(start: ${new Date(options.end! + 1).toISOString()}) 
+|> filter(fn: (r) => r["_measurement"] == "${id}") 
+|> first()
+${!this.config.usetags ? '|> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")' : ''}`;
                         fluxQueries.push(addFluxQuery);
                     }
 
@@ -3145,9 +3185,6 @@ export class InfluxDBAdapter extends Adapter {
                                     if (typeof item.val === 'number' && options.round) {
                                         item.val = Math.round(item.val * options.round) / options.round;
                                     }
-                                    if (options.addId) {
-                                        item.id = storedItem._measurement || id;
-                                    }
                                     result.push(item);
                                 }
                             }
@@ -3158,6 +3195,7 @@ export class InfluxDBAdapter extends Adapter {
                             Aggregate.sendResponse(
                                 this as unknown as ioBroker.Adapter,
                                 msg,
+                                id,
                                 options,
                                 result,
                                 startTime,
@@ -3166,6 +3204,7 @@ export class InfluxDBAdapter extends Adapter {
                             Aggregate.sendResponse(
                                 this as unknown as ioBroker.Adapter,
                                 msg,
+                                id,
                                 options,
                                 e.toString(),
                                 startTime,

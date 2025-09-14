@@ -12,7 +12,6 @@ export abstract class Database {
     protected readonly port: number | string;
     protected readonly protocol: 'http' | 'https';
     protected readonly database: string;
-    protected readonly timePrecision: 'ns' | 'us' | 'ms' | 's';
     protected readonly requestTimeout: number;
 
     protected constructor(options: {
@@ -22,14 +21,12 @@ export abstract class Database {
         protocol: 'http' | 'https';
         database: string;
         requestTimeout: number;
-        timePrecision: 'ns' | 'us' | 'ms' | 's';
     }) {
         this.log = options.log;
         this.host = options.host;
         this.port = options.port;
         this.protocol = options.protocol;
         this.database = options.database;
-        this.timePrecision = options.timePrecision; // ms
         this.requestTimeout = options.requestTimeout;
     }
     abstract connect(): void;
