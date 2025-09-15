@@ -169,7 +169,8 @@ export class InfluxDBAdapter extends Adapter {
     // mapping from ioBroker ID to Alias ID
     private readonly _aliasMap: { [ioBrokerId: string]: string } = {};
     private dockerFolder: string | null = null;
-    private dockerManager: DockerManager | null = null;
+    private dockerManagerForInflux: DockerManager | null = null;
+    private dockerManagerForGrafana: DockerManager | null = null;
 
     public constructor(options: Partial<AdapterOptions> = {}) {
         super({
@@ -509,14 +510,14 @@ export class InfluxDBAdapter extends Adapter {
             let lClient;
             this.log.debug(`TEST DB Version: ${config.dbversion}`);
             let dockerCreated = false;
-            if (config.useDocker) {
+            if (config.dockerInflux) {
                 // Start docker container if not running and then stop it
                 const influxDockerConfig: ContainerConfig = this.getDockerConfig(config);
-                if (!this.dockerManager) {
+                if (!this.dockerManagerForInflux) {
                     dockerCreated = true;
                     influxDockerConfig.iobStopOnUnload = true;
                     influxDockerConfig.removeOnExit = true;
-                    this.dockerManager = new DockerManager(this, [influxDockerConfig]);
+                    this.dockerManagerForInflux = new DockerManager(this, [influxDockerConfig]);
                 }
             }
             config.dbname ||= 'iobroker';
@@ -575,10 +576,10 @@ export class InfluxDBAdapter extends Adapter {
                     return this.sendTo(msg.from, msg.command, { error: extractError(error) }, msg.callback);
                 }
             }
-            if (dockerCreated && this.dockerManager) {
+            if (dockerCreated && this.dockerManagerForInflux) {
                 try {
-                    await this.dockerManager.destroy();
-                    this.dockerManager = null;
+                    await this.dockerManagerForInflux.destroy();
+                    this.dockerManagerForInflux = null;
                 } catch (e) {
                     this.log.error(`Cannot stop docker container: ${extractError(e)}`);
                 }
@@ -889,12 +890,14 @@ export class InfluxDBAdapter extends Adapter {
 
         this.subscribeForeignObjects('*');
 
-        if (this.config.useDocker) {
-            const influxDockerConfig: ContainerConfig = this.getDockerConfig(
-                this.config,
-                this.config.dockerAutoImageUpdate,
-            );
-            this.dockerManager = new DockerManager(this, [influxDockerConfig]);
+        if (this.config.dockerInflux) {
+            const containerConfigs: ContainerConfig[] = [];
+            containerConfigs.push(this.getDockerConfig(this.config, this.config.dockerInfluxAutoImageUpdate));
+
+            if (this.config.dockerGrafana) {
+                containerConfigs.push(this.getDockerConfigGrafana(this.config));
+            }
+            this.dockerManagerForInflux = new DockerManager(this, containerConfigs);
         }
 
         void this.connect();
@@ -919,19 +922,21 @@ export class InfluxDBAdapter extends Adapter {
         //   -e DOCKER_INFLUXDB_INIT_BUCKET=my-bucket \
         //   influxdb:2
         config.dbversion = '2.x';
-        config.dockerPort = parseInt(config.dockerPort as string, 10) || 8086;
+        config.dockerInfluxPort = parseInt(config.dockerInfluxPort as string, 10) || 8086;
         config.protocol = 'http';
         this.dockerFolder = join(getAbsoluteDefaultDataDir(), this.namespace);
         const influxDockerConfig: ContainerConfig = {
             iobEnabled: true,
             iobMonitoringEnabled: true,
             iobAutoImageUpdate: !!dockerAutoImageUpdate,
+            iobStopOnUnload: config.dockerInfluxStopIfInstanceStopped || false,
+
             // influxdb image: https://hub.docker.com/_/influxdb. Only version 2 is supported
             image: 'influxdb:2',
             name: `iobroker_${this.namespace}`,
             ports: [
                 {
-                    hostPort: config.dockerPort,
+                    hostPort: config.dockerInfluxPort,
                     containerPort: 8086,
                     hostIP: '127.0.0.1', // only localhost to disable authentication and https safely
                 },
@@ -974,6 +979,10 @@ export class InfluxDBAdapter extends Adapter {
         config.organization = 'iobroker';
 
         return influxDockerConfig;
+    }
+
+    getDockerConfigGrafana(config: InfluxDBAdapterConfig): ContainerConfig {
+        throw new Error('Method not implemented.');
     }
 
     async writeInitialValue(realId: string, id: string): Promise<void> {
@@ -2381,7 +2390,7 @@ export class InfluxDBAdapter extends Adapter {
         this.writeFileBufferToDisk();
 
         // stop docker if started
-        await this.dockerManager?.destroy();
+        await this.dockerManagerForInflux?.destroy();
 
         if (callback) {
             callback();

@@ -174,10 +174,16 @@ export interface InfluxDBAdapterConfig {
     relogLastValueOnStart: boolean | 'true' | 'false';
     enableDebugLogs: boolean;
     limit: number | string;
-    useDocker: boolean;
-    stopDockerIfInstanceStopped: boolean;
-    dockerPort: number | string;
-    dockerAutoImageUpdate: boolean;
+
+    dockerInflux: boolean;
+    dockerInfluxStopIfInstanceStopped: boolean;
+    dockerInfluxPort: number | string;
+    dockerInfluxAutoImageUpdate: boolean;
+
+    dockerGrafana: boolean;
+    dockerGrafanaStopIfInstanceStopped: boolean;
+    dockerGrafanaPort: number | string;
+    dockerGrafanaAutoImageUpdate: boolean;
 }
 
 export interface InfluxDbCustomConfig {

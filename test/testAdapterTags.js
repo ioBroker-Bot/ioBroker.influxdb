@@ -174,7 +174,7 @@ describe(`Test ${adapterShortName} adapter`, function () {
 
     if (process.env.INFLUXDB2) {
         // Test only with Influxdb 2.x
-        tests.register(it, expect, sendTo, adapterShortName, false, 0, 3);
+        tests.register(it, expect, sendTo, adapterShortName, false, 0, 3, 'influx-tags');
 
         it(`Test ${adapterShortName}: Write string value for memHeapUsed into DB to force a type conflict`, function (done) {
             this.timeout(5000);

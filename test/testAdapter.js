@@ -178,7 +178,7 @@ describe(`Test ${adapterShortName} adapter`, function () {
         });
     });
 
-    tests.register(it, expect, sendTo, adapterShortName, false, 0, 3);
+    tests.register(it, expect, sendTo, adapterShortName, false, 0, 3, 'influx-initial');
 
     it(`Test ${adapterShortName}: Write string value for memHeapUsed into DB to force a type conflict`, function (done) {
         this.timeout(5000);

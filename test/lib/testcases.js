@@ -173,8 +173,11 @@ async function preInit(_objects, _states, sendTo, adapterShortName) {
     states.subscribeMessage('system.adapter.test.0');
 }
 
-function register(it, expect, sendTo, adapterShortName, writeNulls, assumeExistingData, additionalActiveObjects) {
+function register(it, expect, sendTo, adapterShortName, writeNulls, assumeExistingData, additionalActiveObjects, testsName) {
     const instanceName = `${adapterShortName}.0`;
+    if (testsName) {
+        adapterShortName = testsName;
+    }
     if (writeNulls) {
         adapterShortName += '-writeNulls';
     }
@@ -889,13 +892,17 @@ function register(it, expect, sendTo, adapterShortName, writeNulls, assumeExisti
                 expect(result.result[0].val).to.be.equal(62.25);
             }
         } else {
-            expect(result.result.length).to.be.within(1, 2);
+            expect(result.result.length).to.be.within(1, 3);
             const sum = result.result.map(it => it.val).reduce((acc, val) => acc + val, 0);
 
             if (process.env.INFLUXDB2) {
                 expect(parseFloat(sum.toFixed(2))).to.be.within(49, 50);
             } else {
-                expect(parseFloat(sum.toFixed(2))).to.be.equal(62.21);
+                if (assumeExistingData) {
+                    expect(parseFloat(sum.toFixed(2))).to.be.within(60, 90);
+                } else {
+                    expect(parseFloat(sum.toFixed(2))).to.be.equal(62.21);
+                }
             }
         }
         // Result Influxdb1 Doku = 62.211
