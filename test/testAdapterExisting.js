@@ -23,8 +23,8 @@ function checkConnectionOfAdapter(cb, counter) {
         return;
     }
 
-    console.log(`Checking alive key for key : influx-existing`);
-    states.getState(`system.adapter.influx-existing.0.alive`, (err, state) => {
+    console.log(`Checking alive key for key: influx-existing`);
+    states.getState(`system.adapter.influx.0.alive`, (err, state) => {
         err && console.error(err);
         if (state && state.val) {
             cb?.();

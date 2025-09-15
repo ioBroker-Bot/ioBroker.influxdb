@@ -61,7 +61,7 @@ function deepCompare(obj1: any, obj2: any, path: string[] = []): string[] {
         diffs.push(path.join('.'));
     }
 
-    if (typeof obj1 !== 'object' || obj1 === null || obj2 === null) {
+    if (typeof obj1 !== 'object' || obj1 === null || obj2 === null || obj1 === undefined || obj2 === undefined) {
         if (obj1 !== obj2) {
             diffs.push(path.join('.'));
         }
@@ -299,6 +299,7 @@ export default class DockerManager {
         const inspect = await this.containerInspect(container.name);
         if (inspect) {
             const existingConfig = DockerManager.mapInspectToConfig(inspect);
+            console.log('Compare existing config', existingConfig, ' and', container);
             const diffs = deepCompare(existingConfig, container);
             if (diffs.length) {
                 this.#adapter.log.info(

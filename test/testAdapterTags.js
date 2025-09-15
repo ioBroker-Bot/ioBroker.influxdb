@@ -23,8 +23,8 @@ function checkConnectionOfAdapter(cb, counter) {
         return;
     }
 
-    console.log(`Checking alive key for key : influx-tags`);
-    states.getState(`system.adapter.influx-tags.0.alive`, (err, state) => {
+    console.log(`Checking alive key for key: influx-tags`);
+    states.getState(`system.adapter.influx.0.alive`, (err, state) => {
         if (err) {
             console.error(err);
         }

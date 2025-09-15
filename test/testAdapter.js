@@ -24,7 +24,7 @@ function checkConnectionOfAdapter(cb, counter) {
     }
 
     console.log(`Checking alive key for key : influx-initial`);
-    states.getState(`system.adapter.influx-initial.0.alive`, (err, state) => {
+    states.getState(`system.adapter.influx.0.alive`, (err, state) => {
         err && console.error(err);
         if (state && state.val) {
             cb && cb();
@@ -108,7 +108,9 @@ describe(`Test influx-initial adapter`, function () {
         this.timeout(60000);
 
         checkConnectionOfAdapter(res => {
-            res && console.log(res);
+            if (res) {
+                console.log(res);
+            }
             expect(res).not.to.be.equal('Cannot check connection');
             sendTo(
                 'influxdb.0',
