@@ -772,7 +772,6 @@ function register(it, expect, sendTo, adapterShortName, writeNulls, assumeExisti
     it(`Test ${adapterShortName}: Tests with more sample data`, async function () {
         this.timeout(60000);
         const now = new Date();
-        now.setMinutes(0, 0, 0);
         const nowSampleI1 = now.getTime() - 29 * 3_600_000;
         const nowSampleI21 = now.getTime() - 28 * 3_600_000;
         const nowSampleI22 = now.getTime() - 27 * 3_600_000;
@@ -1223,6 +1222,7 @@ function register(it, expect, sendTo, adapterShortName, writeNulls, assumeExisti
             },
             result => {
                 console.log(JSON.stringify(result.result, null, 2));
+                // 32 without existing data, 37
                 expect(result.result.length).to.be.at.least((writeNulls ? 3 : 0) + (assumeExistingData + 1) * 30);
 
                 done();
