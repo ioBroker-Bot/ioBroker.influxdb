@@ -206,7 +206,7 @@ describe(`Test influx-tags adapter`, function () {
             states.getState('influxdb.0.testValueCounter', (err, state) => {
                 let query = 'SELECT * FROM "influxdb.0.testValue"';
                 if (process.env.INFLUXDB2) {
-                    query = `from(bucket: "iobroker") |> filter(fn: (r) => r["_measurement"] == "influxdb.0.testValue") |> duplicate(column: "_value", as: "value") |> sort(columns:["_time"], desc: false)`;
+                    query = `from(bucket: "iobroker") |> range(start: -30d) |> filter(fn: (r) => r["_measurement"] == "influxdb.0.testValue") |> duplicate(column: "_value", as: "value") |> sort(columns:["_time"], desc: false)`;
                 }
                 sendTo('influxdb.0', 'query', query, result => {
                     console.log(JSON.stringify(result.result, null, 2));

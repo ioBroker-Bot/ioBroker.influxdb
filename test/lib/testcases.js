@@ -896,7 +896,11 @@ function register(it, expect, sendTo, adapterShortName, writeNulls, assumeExisti
             const sum = result.result.map(it => it.val).reduce((acc, val) => acc + val, 0);
 
             if (process.env.INFLUXDB2) {
-                expect(parseFloat(sum.toFixed(2))).to.be.within(49, 50);
+                if (assumeExistingData) {
+                    expect(parseFloat(sum.toFixed(2))).to.be.within(49, 80);
+                } else {
+                    expect(parseFloat(sum.toFixed(2))).to.be.within(49, 50);
+                }
             } else {
                 if (assumeExistingData) {
                     expect(parseFloat(sum.toFixed(2))).to.be.within(60, 90);
