@@ -936,7 +936,7 @@ export class InfluxDBAdapter extends Adapter {
 
             // influxdb image: https://hub.docker.com/_/influxdb. Only version 2 is supported
             image: 'influxdb:2',
-            name: `iobroker_${this.namespace}`,
+            name: `iob_${this.namespace.replace(/[-.]/g, '_')}`,
             ports: [
                 {
                     hostPort: config.dockerInflux.port,
@@ -956,6 +956,7 @@ export class InfluxDBAdapter extends Adapter {
                     type: 'bind',
                 },
             ],
+            networkMode: 'iob_net',
             // influxdb v2 requires some environment variables to be set on first start
             environment: {
                 DOCKER_INFLUXDB_INIT_USERNAME: 'iobroker',
@@ -999,8 +1000,8 @@ export class InfluxDBAdapter extends Adapter {
                 config.dockerInflux?.stopIfInstanceStopped || config.dockerGrafana.stopIfInstanceStopped || false,
 
             // influxdb image: https://hub.docker.com/_/influxdb. Only version 2 is supported
-            image: 'grafana/grafana',
-            name: `iobroker_grafana_${this.namespace}`,
+            image: 'grafana/grafana-oss',
+            name: `iob_grafana_${this.namespace.replace(/[-.]/g, '_')}`,
             ports: [
                 {
                     hostPort: config.dockerGrafana.port,
@@ -1011,15 +1012,16 @@ export class InfluxDBAdapter extends Adapter {
             mounts: [
                 {
                     source: `${this.dockerFolder}/grafana-data`,
-                    target: '/var/lib/grafana',
+                    target: '/var/lib/grafana:Z',
                     type: 'bind',
                 },
                 {
                     source: `${this.dockerFolder}/grafana-provisioning`,
-                    target: '/etc/grafana/provisioning',
+                    target: '/etc/grafana/provisioning:Z',
                     type: 'bind',
                 },
             ],
+            networkMode: 'iob_net',
             environment: {
                 GF_SECURITY_ADMIN_PASSWORD: config.dockerGrafana.adminSecurityPassword || 'iobroker',
                 GF_SERVER_ROOT_URL: config.dockerGrafana.serverRootUrl || '',
@@ -1034,16 +1036,15 @@ export class InfluxDBAdapter extends Adapter {
         if (!existsSync(join(this.dockerFolder, 'grafana-provisioning', 'datasources'))) {
             mkdirSync(join(this.dockerFolder, 'grafana-provisioning', 'datasources'), { recursive: true });
         }
-        if (!existsSync(join(this.dockerFolder, 'grafana-provisioning', 'datasources', 'datasource.yml'))) {
-            writeFileSync(
-                join(this.dockerFolder, 'grafana-provisioning', 'datasources', 'datasource.yml'),
-                `apiVersion: 1
+        writeFileSync(
+            join(this.dockerFolder, 'grafana-provisioning', 'datasources', 'datasource.yml'),
+            `apiVersion: 1
 
 datasources:
   - name: InfluxDB
     type: influxdb
     access: proxy
-    url: http://localhost:${config.dockerInflux?.port || 8086}
+    url: http://iob_${this.namespace.replace(/[-.]/g, '_')}:${config.dockerInflux?.port || 8086}
     jsonData:
       version: Flux
       organization: iobroker
@@ -1052,8 +1053,7 @@ datasources:
       token: ${dockerDefaultToken}  
     isDefault: true
 `,
-            );
-        }
+        );
         return dockerConfig;
     }
 
