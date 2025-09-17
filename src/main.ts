@@ -944,6 +944,9 @@ export class InfluxDBAdapter extends Adapter {
                     hostIP: config.dockerInflux.bind || '127.0.0.1', // only localhost to disable authentication and https safely
                 },
             ],
+            labels: {
+                iobroker: this.namespace,
+            },
             mounts: [
                 {
                     source: `${this.dockerFolder}/data`,
@@ -1002,6 +1005,9 @@ export class InfluxDBAdapter extends Adapter {
             // influxdb image: https://hub.docker.com/_/influxdb. Only version 2 is supported
             image: 'grafana/grafana-oss',
             name: `iob_grafana_${this.namespace.replace(/[-.]/g, '_')}`,
+            labels: {
+                iobroker: this.namespace,
+            },
             ports: [
                 {
                     hostPort: config.dockerGrafana.port,

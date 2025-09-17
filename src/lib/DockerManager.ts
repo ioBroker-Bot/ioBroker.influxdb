@@ -17,6 +17,8 @@ import type {
     ImageName,
     NetworkInfo,
     NetworkDriver,
+    VolumeInfo,
+    VolumeDriver,
 } from './dockerManager.types';
 
 const execPromise = promisify(exec);
@@ -106,7 +108,9 @@ function compareConfigs(desired: ContainerConfig, existing: ContainerConfig): st
                 }
             } else {
                 Object.keys(desired[key]).forEach((subKey: string) => {
-                    if (!deepCompare((desired as any)[key][subKey], (existing as any)[key][subKey])) {
+                    if ((desired as any)[key] !== undefined && (existing as any)[key] === undefined) {
+                        diffs.push(`${key}.${subKey}`);
+                    } else if (!deepCompare((desired as any)[key][subKey], (existing as any)[key][subKey])) {
                         diffs.push(`${key}.${subKey}`);
                     }
                 });
@@ -218,6 +222,25 @@ function cleanContainerConfig(obj: ContainerConfig): ContainerConfig {
                     });
             } else {
                 delete obj.environment;
+            }
+        }
+        if (name === 'labels') {
+            if (!obj.labels) {
+                delete obj.labels;
+                return;
+            }
+            const labels = obj.labels as { [key: string]: string };
+            if (Object.keys(labels).length) {
+                obj.labels = {};
+                Object.keys(labels)
+                    .sort()
+                    .forEach(key => {
+                        if (key && labels[key]) {
+                            obj.labels![key] = labels[key];
+                        }
+                    });
+            } else {
+                delete obj.labels;
             }
         }
     });
@@ -1110,19 +1133,29 @@ export default class DockerManager {
     async containerList(all: boolean = true): Promise<ContainerInfo[]> {
         try {
             const { stdout } = await this.#exec(
-                `ps ${all ? '-a' : ''} --format  "{{.Names}};{{.Status}};{{.ID}};{{.Image}};{{.Command}};{{.CreatedAt}};{{.Ports}}"`,
+                `ps ${all ? '-a' : ''} --format  "{{.Names}};{{.Status}};{{.ID}};{{.Image}};{{.Command}};{{.CreatedAt}};{{.Ports}};{{.Labels}}"`,
             );
             return stdout
                 .split('\n')
                 .filter(line => line.trim() !== '')
                 .map(line => {
-                    const [names, statusInfo, id, image, command, createdAt, ports] = line.split(';');
+                    const [names, statusInfo, id, image, command, createdAt, ports, labels] = line.split(';');
                     const [status, ...uptime] = statusInfo.split(' ');
                     let statusKey: ContainerInfo['status'] = status.toLowerCase() as ContainerInfo['status'];
                     if ((statusKey as string) === 'up') {
                         statusKey = 'running';
                     }
-                    return { id, image, command, createdAt, status: statusKey, uptime: uptime.join(' '), ports, names };
+                    return {
+                        id,
+                        image,
+                        command,
+                        createdAt,
+                        status: statusKey,
+                        uptime: uptime.join(' '),
+                        ports,
+                        names,
+                        labels,
+                    };
                 });
         } catch (e) {
             this.adapter.log.debug(`Cannot list containers: ${e.message}`);
@@ -1409,6 +1442,66 @@ export default class DockerManager {
             throw new Error(`Network ${networkId} still found after deletion`);
         }
         return { ...result, networks };
+    }
+
+    /** List all volumes */
+    async volumeList(): Promise<VolumeInfo[]> {
+        // docker network ls
+        try {
+            const { stdout } = await this.#exec(`volume ls --format "{{.Name}};{{.Driver}};{{.Mountpoint}}"`);
+            return stdout
+                .split('\n')
+                .filter(line => line.trim() !== '')
+                .map(line => {
+                    const [name, driver, volume] = line.split(';');
+                    return { name, driver: driver as VolumeDriver, volume };
+                });
+        } catch (e) {
+            this.adapter.log.debug(`Cannot list networks: ${e.message.toString()}`);
+            return [];
+        }
+    }
+
+    /**
+     * Create a volume
+     *
+     * @param name Volume name
+     * @param driver Volume driver
+     * @param volume Volume options (depends on driver)
+     */
+    async volumeCreate(
+        name: string,
+        driver?: VolumeDriver,
+        volume?: string,
+    ): Promise<{ stdout: string; stderr: string; volumes?: VolumeInfo[] }> {
+        let result: { stdout: string; stderr: string };
+        if (driver === 'local' || !driver) {
+            if (volume) {
+                result = await this.#exec(
+                    `volume create local --opt type=none --opt device=${volume} --opt o=bind ${name}`,
+                );
+            } else {
+                result = await this.#exec(`volume create ${name}`);
+            }
+        } else {
+            throw new Error('not implemented');
+        }
+
+        const volumes = await this.volumeList();
+        if (!volumes.find(it => it.name === name)) {
+            throw new Error(`Network ${name} not found after creation`);
+        }
+        return { ...result, volumes };
+    }
+
+    /** Remove a volume */
+    async volumeRemove(volumeName: string): Promise<{ stdout: string; stderr: string; volumes?: VolumeInfo[] }> {
+        const result = await this.#exec(`volume remove ${volumeName}`);
+        const volumes = await this.volumeList();
+        if (volumes.find(it => it.name === volumeName)) {
+            throw new Error(`Volume ${volumeName} still found after deletion`);
+        }
+        return { ...result, volumes };
     }
 
     /** Stop own containers if necessary */

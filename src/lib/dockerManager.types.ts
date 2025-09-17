@@ -599,6 +599,7 @@ export type ContainerInfo = {
     uptime: string;
     ports: string;
     names: string;
+    labels: string;
     httpLinks?: { [ip: string]: string[] };
 };
 
@@ -609,6 +610,23 @@ export type ImageInfo = {
     createdSince: string;
     size: number;
 };
+export type VolumeDriver =
+    | 'local'
+    | 'tmpfs'
+    | 'nfs'
+    | 'cifs'
+    | 'sshfs'
+    | 'flocker'
+    | 'glusterfs'
+    | 'ceph'
+    | 'rexray'
+    | 'portworx';
+export type VolumeInfo = {
+    name: string;
+    driver: VolumeDriver;
+    volume: string;
+};
+
 export type NetworkDriver = 'bridge' | 'container' | 'host' | 'macvlan' | 'overlay';
 export type NetworkInfo = {
     name: string;
