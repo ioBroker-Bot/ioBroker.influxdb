@@ -169,8 +169,7 @@ export class InfluxDBAdapter extends Adapter {
     // mapping from ioBroker ID to Alias ID
     private readonly _aliasMap: { [ioBrokerId: string]: string } = {};
     private dockerFolder: string | null = null;
-    private dockerManagerForInflux: DockerManager | null = null;
-    private dockerManagerForGrafana: DockerManager | null = null;
+    private dockerManager: DockerManager | null = null;
 
     public constructor(options: Partial<AdapterOptions> = {}) {
         super({
@@ -513,11 +512,11 @@ export class InfluxDBAdapter extends Adapter {
             if (config.dockerInflux?.enabled) {
                 // Start docker container if not running and then stop it
                 const influxDockerConfig: ContainerConfig = this.getDockerConfigInflux(config);
-                if (!this.dockerManagerForInflux) {
+                if (!this.dockerManager) {
                     dockerCreated = true;
                     influxDockerConfig.iobStopOnUnload = true;
                     influxDockerConfig.removeOnExit = true;
-                    this.dockerManagerForInflux = new DockerManager(this, [influxDockerConfig]);
+                    this.dockerManager = new DockerManager(this, [influxDockerConfig]);
                 }
             }
             config.dbname ||= 'iobroker';
@@ -576,10 +575,10 @@ export class InfluxDBAdapter extends Adapter {
                     return this.sendTo(msg.from, msg.command, { error: extractError(error) }, msg.callback);
                 }
             }
-            if (dockerCreated && this.dockerManagerForInflux) {
+            if (dockerCreated && this.dockerManager) {
                 try {
-                    await this.dockerManagerForInflux.destroy();
-                    this.dockerManagerForInflux = null;
+                    await this.dockerManager.destroy();
+                    this.dockerManager = null;
                 } catch (e) {
                     this.log.error(`Cannot stop docker container: ${extractError(e)}`);
                 }
@@ -897,7 +896,8 @@ export class InfluxDBAdapter extends Adapter {
             if (this.config.dockerGrafana) {
                 containerConfigs.push(this.getDockerConfigGrafana(this.config));
             }
-            this.dockerManagerForInflux = new DockerManager(this, containerConfigs);
+            this.dockerManager = new DockerManager(this, containerConfigs);
+            await this.dockerManager.allOwnContainersChecked();
         }
 
         void this.connect();
@@ -906,7 +906,9 @@ export class InfluxDBAdapter extends Adapter {
             // store all buffered data every x seconds to not lost the data
             this._seriesBufferChecker = setInterval(() => {
                 this._seriesBufferFlushPlanned = true;
-                void this.storeBufferedSeries();
+                void this.storeBufferedSeries().catch(e =>
+                    this.log.error(`Cannot store buffered series: ${extractError(e)}`),
+                );
             }, this.config.seriesBufferFlushInterval * 1000);
         }
     }
@@ -936,7 +938,7 @@ export class InfluxDBAdapter extends Adapter {
 
             // influxdb image: https://hub.docker.com/_/influxdb. Only version 2 is supported
             image: 'influxdb:2',
-            name: `iob_${this.namespace.replace(/[-.]/g, '_')}`,
+            name: true, // take default name iob_influxdb_<instance>
             ports: [
                 {
                     hostPort: config.dockerInflux.port,
@@ -944,24 +946,23 @@ export class InfluxDBAdapter extends Adapter {
                     hostIP: config.dockerInflux.bind || '127.0.0.1', // only localhost to disable authentication and https safely
                 },
             ],
-            labels: {
-                iobroker: this.namespace,
-            },
             mounts: [
                 {
-                    source: `${this.dockerFolder}/data`,
+                    source: 'flux_data',
                     target: '/var/lib/influxdb2',
-                    type: 'bind',
+                    type: 'volume',
+                    iobBackup: true,
                 },
                 {
-                    source: `${this.dockerFolder}/config`,
+                    source: 'flux_config',
                     target: '/etc/influxdb2',
-                    type: 'bind',
+                    type: 'volume',
                 },
             ],
-            networkMode: 'iob_net',
+            networkMode: true, // take default name iob_influxdb_<instance>
             // influxdb v2 requires some environment variables to be set on first start
             environment: {
+                DOCKER_INFLUXDB_INIT_MODE: 'setup',
                 DOCKER_INFLUXDB_INIT_USERNAME: 'iobroker',
                 DOCKER_INFLUXDB_INIT_PASSWORD: 'iobroker',
                 DOCKER_INFLUXDB_INIT_BUCKET: 'iobroker',
@@ -969,21 +970,8 @@ export class InfluxDBAdapter extends Adapter {
                 DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: dockerDefaultToken,
             },
         };
-        // ensure that the folders exist
-        if (!existsSync(join(this.dockerFolder, 'data'))) {
-            mkdirSync(join(this.dockerFolder, 'data'), { recursive: true });
-        }
-        if (!existsSync(join(this.dockerFolder, 'config'))) {
-            mkdirSync(join(this.dockerFolder, 'config'), { recursive: true });
-            influxDockerConfig.environment!.DOCKER_INFLUXDB_INIT_MODE = 'setup';
-        } else {
-            // check if we have already a config file
-            if (!existsSync(join(this.dockerFolder, 'config', 'influx-configs'))) {
-                influxDockerConfig.environment!.DOCKER_INFLUXDB_INIT_MODE = 'setup';
-            }
-        }
         config.token = influxDockerConfig.environment!.DOCKER_INFLUXDB_INIT_ADMIN_TOKEN;
-        config.organization = 'iobroker';
+        config.organization = influxDockerConfig.environment!.DOCKER_INFLUXDB_INIT_ORG;
 
         return influxDockerConfig;
     }
@@ -1004,10 +992,7 @@ export class InfluxDBAdapter extends Adapter {
 
             // influxdb image: https://hub.docker.com/_/influxdb. Only version 2 is supported
             image: 'grafana/grafana-oss',
-            name: `iob_grafana_${this.namespace.replace(/[-.]/g, '_')}`,
-            labels: {
-                iobroker: this.namespace,
-            },
+            name: 'grafana',
             ports: [
                 {
                     hostPort: config.dockerGrafana.port,
@@ -1015,19 +1000,23 @@ export class InfluxDBAdapter extends Adapter {
                     hostIP: config.dockerGrafana.bind || '127.0.0.1', // only localhost to disable authentication and https safely
                 },
             ],
+            // volumes will be created automatically
             mounts: [
                 {
-                    source: `${this.dockerFolder}/grafana-data`,
-                    target: '/var/lib/grafana:Z',
-                    type: 'bind',
+                    source: 'grafana_data',
+                    target: '/var/lib/grafana',
+                    type: 'volume',
+                    iobBackup: true,
                 },
                 {
-                    source: `${this.dockerFolder}/grafana-provisioning`,
-                    target: '/etc/grafana/provisioning:Z',
-                    type: 'bind',
+                    source: 'grafana_provisioning',
+                    target: '/etc/grafana/provisioning',
+                    type: 'volume',
+                    iobAutoCopyFrom: join(__dirname, 'grafana-provisioning'),
+                    iobAutoCopyFromForce: true,
                 },
             ],
-            networkMode: 'iob_net',
+            networkMode: true, // take default name iob_influxdb_<instance>
             environment: {
                 GF_SECURITY_ADMIN_PASSWORD: config.dockerGrafana.adminSecurityPassword || 'iobroker',
                 GF_SERVER_ROOT_URL: config.dockerGrafana.serverRootUrl || '',
@@ -1036,14 +1025,12 @@ export class InfluxDBAdapter extends Adapter {
             },
         };
         // ensure that the folders exist
-        if (!existsSync(join(this.dockerFolder, 'grafana-data'))) {
-            mkdirSync(join(this.dockerFolder, 'grafana-data'), { recursive: true });
-        }
-        if (!existsSync(join(this.dockerFolder, 'grafana-provisioning', 'datasources'))) {
-            mkdirSync(join(this.dockerFolder, 'grafana-provisioning', 'datasources'), { recursive: true });
+        const provisioningFolder = join(__dirname, 'grafana-provisioning', 'datasources');
+        if (!existsSync(provisioningFolder)) {
+            mkdirSync(provisioningFolder, { recursive: true });
         }
         writeFileSync(
-            join(this.dockerFolder, 'grafana-provisioning', 'datasources', 'datasource.yml'),
+            join(__dirname, 'grafana-provisioning', 'datasources', 'datasource.yml'),
             `apiVersion: 1
 
 datasources:
@@ -1060,6 +1047,7 @@ datasources:
     isDefault: true
 `,
         );
+
         return dockerConfig;
     }
 
@@ -2468,7 +2456,7 @@ datasources:
         this.writeFileBufferToDisk();
 
         // stop docker if started
-        await this.dockerManagerForInflux?.destroy();
+        await this.dockerManager?.destroy();
 
         if (callback) {
             callback();

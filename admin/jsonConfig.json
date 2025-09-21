@@ -17,6 +17,7 @@
                     "newLine": true,
                     "type": "checkDocker",
                     "hideVersion": true,
+                    "hidden": "!data.dockerInflux?.enabled",
                     "label": "Use self-hosted Grafana in Docker",
                     "xs": 12
                 },
@@ -30,7 +31,7 @@
                         { "label": "1.x", "value": "1.x" },
                         { "label": "2.x", "value": "2.x" }
                     ],
-                    "hidden": "!!data.useDocker",
+                    "hidden": "!!data.dockerInflux?.enabled",
                     "sm": 12,
                     "md": 8
                 },
@@ -42,14 +43,14 @@
                         { "label": "http", "value": "http" },
                         { "label": "https", "value": "https" }
                     ],
-                    "hidden": "!!data.useDocker",
+                    "hidden": "!!data.dockerInflux?.enabled",
                     "label": "Protocol",
                     "sm": 12,
                     "md": 2
                 },
                 "host": {
                     "type": "text",
-                    "hidden": "!!data.useDocker",
+                    "hidden": "!!data.dockerInflux?.enabled",
                     "label": "Host",
                     "sm": 12,
                     "md": 8
@@ -57,7 +58,7 @@
                 "port": {
                     "type": "number",
                     "label": "Port",
-                    "hidden": "!!data.useDocker",
+                    "hidden": "!!data.dockerInflux?.enabled",
                     "min": 1,
                     "max": 65565,
                     "sm": 12,
@@ -67,7 +68,7 @@
                     "type": "text",
                     "label": "Path",
                     "help": "only enter when e.g. a reverse proxy is used",
-                    "hidden": "data.dbversion === '1.x' || !!data.useDocker",
+                    "hidden": "data.dbversion === '1.x' || !!data.dockerInflux?.enabled",
                     "sm": 12,
                     "md": 4
                 },
@@ -75,14 +76,14 @@
                     "newLine": true,
                     "type": "text",
                     "label": "User",
-                    "hidden": "data.dbversion === '2.x' || !!data.useDocker",
+                    "hidden": "data.dbversion === '2.x' || !!data.dockerInflux?.enabled",
                     "sm": 12,
                     "md": 4
                 },
                 "password": {
                     "type": "password",
                     "label": "Password",
-                    "hidden": "data.dbversion === '2.x' || !!data.useDocker",
+                    "hidden": "data.dbversion === '2.x' || !!data.dockerInflux?.enabled",
                     "repeat": true,
                     "sm": 12,
                     "md": 8
@@ -91,7 +92,7 @@
                     "newLine": true,
                     "type": "text",
                     "label": "Organization",
-                    "hidden": "data.dbversion === '1.x' || !!data.useDocker",
+                    "hidden": "data.dbversion === '1.x' || !!data.dockerInflux?.enabled",
                     "sm": 12,
                     "md": 4
                 },
@@ -106,7 +107,7 @@
                     "newLine": true,
                     "type": "text",
                     "label": "DB Name",
-                    "hidden": "!!data.useDocker",
+                    "hidden": "!!data.dockerInflux?.enabled",
                     "sm": 12,
                     "md": 8
                 },
@@ -122,7 +123,7 @@
                     "newLine": false,
                     "type": "checkbox",
                     "label": "Validate SSL certificate",
-                    "hidden": "data.dbversion === '1.x' || !!data.useDocker",
+                    "hidden": "data.dbversion === '1.x' || !!data.dockerInflux?.enabled",
                     "sm": 12,
                     "md": 4
                 },
@@ -381,7 +382,7 @@
         "dockerInflux": {
             "type": "panel",
             "label": "InfluxDB Docker",
-            "hidden": "!dockerInflux.?enabled",
+            "hidden": "!data.dockerInflux.?enabled",
             "items": {
                 "dockerInflux.bind": {
                     "newLine": true,
@@ -418,7 +419,7 @@
         "dockerGrafana": {
             "type": "panel",
             "label": "Grafana Docker",
-            "hidden": "!dockerGrafana.?enabled",
+            "hidden": "!data.dockerGrafana.?enabled || !data.dockerInflux.?enabled",
             "items": {
                 "dockerGrafana.bind": {
                     "type": "ip",
