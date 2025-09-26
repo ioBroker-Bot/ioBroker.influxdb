@@ -13,8 +13,7 @@ import type {
     InfluxDbCustomConfigTyped,
     IobDataEntry,
 } from './types';
-import DockerManager from './lib/DockerManager';
-import type { ContainerConfig } from './lib/dockerManager.types';
+import { DockerManagerOfOwnContainers, type ContainerConfig } from '@iobroker/plugin-docker';
 const dataDir = getAbsoluteDefaultDataDir();
 let cacheFile = join(dataDir, 'influxdata.json');
 
@@ -168,7 +167,6 @@ export class InfluxDBAdapter extends Adapter {
     private _finished = false;
     // mapping from ioBroker ID to Alias ID
     private readonly _aliasMap: { [ioBrokerId: string]: string } = {};
-    private dockerManager: DockerManager | null = null;
 
     public constructor(options: Partial<AdapterOptions> = {}) {
         super({
@@ -489,6 +487,66 @@ export class InfluxDBAdapter extends Adapter {
         }
     }
 
+    getDockerConfigInflux(config: InfluxDBAdapterConfig): ContainerConfig {
+        config.dockerInflux ||= {
+            enabled: true,
+        };
+        // docker run -d -p 8086:8086 \
+        //   -v $PWD/data:/var/lib/influxdb2 \
+        //   -v $PWD/config:/etc/influxdb2 \
+        //   -e DOCKER_INFLUXDB_INIT_MODE=setup \
+        //   -e DOCKER_INFLUXDB_INIT_USERNAME=my-user \
+        //   -e DOCKER_INFLUXDB_INIT_PASSWORD=my-password \
+        //   -e DOCKER_INFLUXDB_INIT_ORG=my-org \
+        //   -e DOCKER_INFLUXDB_INIT_BUCKET=my-bucket \
+        //   influxdb:2
+        config.dbversion = '2.x';
+        config.dockerInflux.port = parseInt((config.dockerInflux.port as string) || '8086', 10) || 8086;
+        config.protocol = 'http';
+        const influxDockerConfig: ContainerConfig = {
+            iobEnabled: true,
+            iobStopOnUnload: true,
+            removeOnExit: true,
+
+            // influxdb image: https://hub.docker.com/_/influxdb. Only version 2 is supported
+            image: 'influxdb:2',
+            ports: [
+                {
+                    hostPort: config.dockerInflux.port,
+                    containerPort: 8086,
+                    hostIP: config.dockerInflux.bind || '127.0.0.1', // only localhost to disable authentication and https safely
+                },
+            ],
+            mounts: [
+                {
+                    source: 'flux_data',
+                    target: '/var/lib/influxdb2',
+                    type: 'volume',
+                    iobBackup: true,
+                },
+                {
+                    source: 'flux_config',
+                    target: '/etc/influxdb2',
+                    type: 'volume',
+                },
+            ],
+            networkMode: true, // take default name iob_influxdb_<instance>
+            // influxdb v2 requires some environment variables to be set on first start
+            environment: {
+                DOCKER_INFLUXDB_INIT_MODE: 'setup',
+                DOCKER_INFLUXDB_INIT_USERNAME: 'iobroker',
+                DOCKER_INFLUXDB_INIT_PASSWORD: 'iobroker',
+                DOCKER_INFLUXDB_INIT_BUCKET: 'iobroker',
+                DOCKER_INFLUXDB_INIT_ORG: 'iobroker',
+                DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: dockerDefaultToken,
+            },
+        };
+        config.token = influxDockerConfig.environment!.DOCKER_INFLUXDB_INIT_ADMIN_TOKEN;
+        config.organization = influxDockerConfig.environment!.DOCKER_INFLUXDB_INIT_ORG;
+
+        return influxDockerConfig;
+    }
+
     async testConnection(msg: ioBroker.Message): Promise<void> {
         this.log.debug(`testConnection msg-object: ${JSON.stringify(msg)}`);
         if (!msg || !msg.message || !isObject(msg.message.config)) {
@@ -508,14 +566,28 @@ export class InfluxDBAdapter extends Adapter {
             let lClient;
             this.log.debug(`TEST DB Version: ${config.dbversion}`);
             let dockerCreated = false;
+            let dockerManager: DockerManagerOfOwnContainers | undefined;
             if (config.dockerInflux?.enabled) {
                 // Start docker container if not running and then stop it
                 const influxDockerConfig: ContainerConfig = this.getDockerConfigInflux(config);
-                if (!this.dockerManager) {
+                dockerManager = this.getPluginInstance('docker')?.getDockerManager();
+                if (!dockerManager) {
                     dockerCreated = true;
-                    influxDockerConfig.iobStopOnUnload = true;
                     influxDockerConfig.removeOnExit = true;
-                    this.dockerManager = new DockerManager(this, undefined, [influxDockerConfig]);
+                    dockerManager = new DockerManagerOfOwnContainers(
+                        {
+                            logger: {
+                                level: 'silly',
+                                silly: this.log.silly.bind(this.log),
+                                debug: this.log.debug.bind(this.log),
+                                info: this.log.info.bind(this.log),
+                                warn: this.log.warn.bind(this.log),
+                                error: this.log.error.bind(this.log),
+                            },
+                            namespace: this.namespace,
+                        },
+                        [influxDockerConfig],
+                    );
                 }
             }
             config.dbname ||= 'iobroker';
@@ -574,10 +646,9 @@ export class InfluxDBAdapter extends Adapter {
                     return this.sendTo(msg.from, msg.command, { error: extractError(error) }, msg.callback);
                 }
             }
-            if (dockerCreated && this.dockerManager) {
+            if (dockerCreated && dockerManager) {
                 try {
-                    await this.dockerManager.destroy();
-                    this.dockerManager = null;
+                    await dockerManager.destroy();
                 } catch (e) {
                     this.log.error(`Cannot stop docker container: ${extractError(e)}`);
                 }
@@ -888,15 +959,10 @@ export class InfluxDBAdapter extends Adapter {
 
         this.subscribeForeignObjects('*');
 
-        if (this.config.dockerInflux?.enabled) {
-            const containerConfigs: ContainerConfig[] = [];
-            containerConfigs.push(this.getDockerConfigInflux(this.config, this.config.dockerInflux?.autoImageUpdate));
-
-            if (this.config.dockerGrafana) {
-                containerConfigs.push(this.getDockerConfigGrafana(this.config));
-            }
-            this.dockerManager = new DockerManager(this, undefined, containerConfigs);
-            await this.dockerManager.allOwnContainersChecked();
+        if (this.config.dockerInflux?.enabled && this.config.dockerGrafana?.enabled) {
+            this.prepareDockerConfigGrafana(this.config);
+            // Inform docker plugin about grafana provisioning folder is ready
+            this.getPluginInstance('docker')?.instanceIsReady();
         }
 
         void this.connect();
@@ -912,114 +978,7 @@ export class InfluxDBAdapter extends Adapter {
         }
     }
 
-    getDockerConfigInflux(config: InfluxDBAdapterConfig, dockerAutoImageUpdate?: boolean): ContainerConfig {
-        config.dockerInflux ||= {
-            enabled: false,
-        };
-        // docker run -d -p 8086:8086 \
-        //   -v $PWD/data:/var/lib/influxdb2 \
-        //   -v $PWD/config:/etc/influxdb2 \
-        //   -e DOCKER_INFLUXDB_INIT_MODE=setup \
-        //   -e DOCKER_INFLUXDB_INIT_USERNAME=my-user \
-        //   -e DOCKER_INFLUXDB_INIT_PASSWORD=my-password \
-        //   -e DOCKER_INFLUXDB_INIT_ORG=my-org \
-        //   -e DOCKER_INFLUXDB_INIT_BUCKET=my-bucket \
-        //   influxdb:2
-        config.dbversion = '2.x';
-        config.dockerInflux.port = parseInt((config.dockerInflux.port as string) || '8086', 10) || 8086;
-        config.protocol = 'http';
-        const influxDockerConfig: ContainerConfig = {
-            iobEnabled: true,
-            iobMonitoringEnabled: true,
-            iobAutoImageUpdate: !!dockerAutoImageUpdate,
-            iobStopOnUnload: config.dockerInflux.stopIfInstanceStopped || false,
-
-            // influxdb image: https://hub.docker.com/_/influxdb. Only version 2 is supported
-            image: 'influxdb:2',
-            ports: [
-                {
-                    hostPort: config.dockerInflux.port,
-                    containerPort: 8086,
-                    hostIP: config.dockerInflux.bind || '127.0.0.1', // only localhost to disable authentication and https safely
-                },
-            ],
-            mounts: [
-                {
-                    source: 'flux_data',
-                    target: '/var/lib/influxdb2',
-                    type: 'volume',
-                    iobBackup: true,
-                },
-                {
-                    source: 'flux_config',
-                    target: '/etc/influxdb2',
-                    type: 'volume',
-                },
-            ],
-            networkMode: true, // take default name iob_influxdb_<instance>
-            // influxdb v2 requires some environment variables to be set on first start
-            environment: {
-                DOCKER_INFLUXDB_INIT_MODE: 'setup',
-                DOCKER_INFLUXDB_INIT_USERNAME: 'iobroker',
-                DOCKER_INFLUXDB_INIT_PASSWORD: 'iobroker',
-                DOCKER_INFLUXDB_INIT_BUCKET: 'iobroker',
-                DOCKER_INFLUXDB_INIT_ORG: 'iobroker',
-                DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: dockerDefaultToken,
-            },
-        };
-        config.token = influxDockerConfig.environment!.DOCKER_INFLUXDB_INIT_ADMIN_TOKEN;
-        config.organization = influxDockerConfig.environment!.DOCKER_INFLUXDB_INIT_ORG;
-
-        return influxDockerConfig;
-    }
-
-    getDockerConfigGrafana(config: InfluxDBAdapterConfig): ContainerConfig {
-        config.dockerGrafana ||= {
-            enabled: false,
-        };
-        config.dockerGrafana.port = parseInt((config.dockerGrafana.port as string) || '3000', 10) || 3000;
-        const dockerConfig: ContainerConfig = {
-            iobEnabled: config.dockerGrafana.enabled !== false,
-            iobMonitoringEnabled: true,
-            iobAutoImageUpdate: !!config.dockerGrafana.autoImageUpdate,
-            // Stop docker too if influxdb is stopped
-            iobStopOnUnload:
-                config.dockerInflux?.stopIfInstanceStopped || config.dockerGrafana.stopIfInstanceStopped || false,
-
-            // influxdb image: https://hub.docker.com/_/influxdb. Only version 2 is supported
-            image: 'grafana/grafana-oss',
-            name: 'grafana',
-            ports: [
-                {
-                    hostPort: config.dockerGrafana.port,
-                    containerPort: 3000,
-                    hostIP: config.dockerGrafana.bind || '127.0.0.1', // only localhost to disable authentication and https safely
-                },
-            ],
-            // volumes will be created automatically
-            mounts: [
-                {
-                    source: 'grafana_data',
-                    target: '/var/lib/grafana',
-                    type: 'volume',
-                    iobBackup: true,
-                },
-                {
-                    source: 'grafana_provisioning',
-                    target: '/etc/grafana/provisioning',
-                    type: 'volume',
-                    iobAutoCopyFrom: join(__dirname, 'grafana-provisioning'),
-                    iobAutoCopyFromForce: true,
-                },
-            ],
-            networkMode: true, // take default name iob_influxdb_<instance>
-            environment: {
-                GF_SECURITY_ADMIN_PASSWORD: config.dockerGrafana.adminSecurityPassword || 'iobroker',
-                GF_SERVER_ROOT_URL: config.dockerGrafana.serverRootUrl || '',
-                GF_INSTALL_PLUGINS: config.dockerGrafana.plugins?.map(it => it.trim()).join(',') || '',
-                GF_USERS_ALLOW_SIGN_UP: config.dockerGrafana.usersAllowSignUp ? 'true' : 'false',
-            },
-        };
+    prepareDockerConfigGrafana(config: InfluxDBAdapterConfig): void {
         // ensure that the folders exist
         const provisioningFolder = join(__dirname, 'grafana-provisioning', 'datasources');
         if (!existsSync(provisioningFolder)) {
@@ -1043,8 +1002,6 @@ datasources:
     isDefault: true
 `,
         );
-
-        return dockerConfig;
     }
 
     async writeInitialValue(realId: string, id: string): Promise<void> {
@@ -2451,9 +2408,6 @@ datasources:
 
         this.writeFileBufferToDisk();
 
-        // stop docker if started
-        await this.dockerManager?.destroy();
-
         if (callback) {
             callback();
         } else {
@@ -3527,15 +3481,19 @@ ${!this.config.usetags ? '|> pivot(rowKey:["_time"], columnKey: ["_field"], valu
             this.sendTo(msg.from, msg.command, { error: 'Invalid call' }, msg.callback);
             return;
         }
-        const obj = {} as ioBroker.StateObject;
-        obj.common = {} as ioBroker.StateCommon;
-        obj.common.custom = {};
-        if (msg.message.options) {
-            obj.common.custom[this.namespace] = msg.message.options;
-        } else {
-            obj.common.custom[this.namespace] = {};
+        const obj = {
+            common: {
+                custom: {
+                    [this.namespace]: {},
+                },
+            },
+        } as ioBroker.StateObject;
+        if (obj.common.custom) {
+            if (msg.message.options) {
+                obj.common.custom[this.namespace] = msg.message.options;
+            }
+            obj.common.custom[this.namespace].enabled = true;
         }
-        obj.common.custom[this.namespace].enabled = true;
         this.extendForeignObject(msg.message.id, obj, error => {
             if (error) {
                 this.log.error(`enableHistory: ${error}`);
@@ -3553,11 +3511,11 @@ ${!this.config.usetags ? '|> pivot(rowKey:["_time"], columnKey: ["_field"], valu
             this.sendTo(msg.from, msg.command, { error: 'Invalid call' }, msg.callback);
             return;
         }
-        const obj = {} as ioBroker.StateObject;
-        obj.common = {} as ioBroker.StateCommon;
-        obj.common.custom = {};
-        obj.common.custom[this.namespace] = {};
-        obj.common.custom[this.namespace].enabled = false;
+        const obj = {
+            common: {
+                custom: { [this.namespace]: { enabled: false } },
+            },
+        } as ioBroker.StateObject;
         this.extendForeignObject(msg.message.id, obj, error => {
             if (error) {
                 this.log.error(`disableHistory: ${error}`);
