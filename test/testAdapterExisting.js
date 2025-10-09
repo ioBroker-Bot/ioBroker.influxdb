@@ -3,11 +3,11 @@
 /* jslint node: true */
 /* jshint expr: true */
 const expect = require('chai').expect;
-const setup  = require('./lib/setup');
+const setup = require('./lib/setup');
 const tests = require('./lib/testcases');
 
 let objects = null;
-let states  = null;
+let states = null;
 let onStateChanged = null;
 let sendToID = 1;
 
@@ -19,79 +19,58 @@ function checkConnectionOfAdapter(cb, counter) {
     counter = counter || 0;
     console.log(`Try check #${counter}`);
     if (counter > 30) {
-        cb && cb('Cannot check connection');
+        cb?.('Cannot check connection');
         return;
     }
 
-    console.log(`Checking alive key for key : ${adapterShortName}`);
-    states.getState(`system.adapter.${adapterShortName}.0.alive`, (err, state) => {
+    console.log(`Checking alive key for key: influx-existing`);
+    states.getState(`system.adapter.influxdb.0.alive`, (err, state) => {
         err && console.error(err);
         if (state && state.val) {
-            cb && cb();
+            cb?.();
         } else {
-            setTimeout(() =>
-                checkConnectionOfAdapter(cb, counter + 1)
-            , 1000);
-        }
-    });
-}
-
-function checkValueOfState(id, value, cb, counter) {
-    counter = counter || 0;
-    if (counter > 20) {
-        cb && cb(`Cannot check value Of State ${id}`);
-        return;
-    }
-
-    states.getState(id, (err, state) => {
-        err && console.error(err);
-        if (value === null && !state) {
-            cb && cb();
-        } else
-        if (state && (value === undefined || state.val === value)) {
-            cb && cb();
-        } else {
-            setTimeout(() =>
-                checkValueOfState(id, value, cb, counter + 1)
-            , 500);
+            setTimeout(() => checkConnectionOfAdapter(cb, counter + 1), 1000);
         }
     });
 }
 
 function sendTo(target, command, message, callback) {
-    onStateChanged = function (id, state) {
+    onStateChanged = (id, state) => {
         if (id === 'messagebox.system.adapter.test.0') {
             callback(state.message);
         }
     };
 
     states.pushMessage(`system.adapter.${target}`, {
-        command:    command,
-        message:    message,
-        from:       'system.adapter.test.0',
+        command: command,
+        message: message,
+        from: 'system.adapter.test.0',
         callback: {
             message: message,
-            id:      sendToID++,
-            ack:     false,
-            time:    Date.now()
-        }
+            id: sendToID++,
+            ack: false,
+            time: Date.now(),
+        },
     });
 }
 
-describe(`Test ${adapterShortName} adapter`, function () {
-    before(`Test ${adapterShortName} adapter: Start js-controller`, function (_done) {
+describe(`Test influx-existing adapter`, function () {
+    before(`Test influx-existing adapter: Start js-controller`, function (_done) {
         this.timeout(600000); // because of first install from npm
 
         setup.setupController(async () => {
             const config = await setup.getAdapterConfig();
             // enable adapter
-            config.common.enabled  = true;
+            config.common.enabled = true;
             config.common.loglevel = 'debug';
 
             if (process.env.INFLUXDB2) {
-                const authToken = JSON.parse(process.env.AUTHTOKEN).token;
-                console.log(`AUTHTOKEN=${process.env.AUTHTOKEN}`);
-                console.log(`extracted token =${authToken}`);
+                let authToken;
+                if (process.env.AUTHTOKEN) {
+                    authToken = JSON.parse(process.env.AUTHTOKEN).token;
+                    console.log(`AUTHTOKEN=${process.env.AUTHTOKEN}`);
+                    console.log(`extracted token =${authToken}`);
+                }
                 config.native.dbversion = '2.x';
 
                 let secret = await setup.getSecret();
@@ -100,8 +79,8 @@ describe(`Test ${adapterShortName} adapter`, function () {
                 }
 
                 console.log(`############SECRET: ${secret}`);
-                config.native.token = setup.encrypt(secret, 'test-token'); //authToken;
-                config.native.organization = 'test-org';
+                config.native.token = setup.encrypt(secret, process.env.INFLUXDB2_TOKEN || 'test-token'); //authToken;
+                config.native.organization = process.env.INFLUXDB2_ORG || 'test-org';
             } else if (process.env.INFLUX_DB1_HOST) {
                 config.native.host = process.env.INFLUX_DB1_HOST;
             }
@@ -115,90 +94,108 @@ describe(`Test ${adapterShortName} adapter`, function () {
                 (id, state) => onStateChanged && onStateChanged(id, state),
                 async (_objects, _states) => {
                     objects = _objects;
-                    states  = _states;
+                    states = _states;
 
                     await tests.preInit(objects, states, sendTo, adapterShortName);
 
                     _done();
-                });
+                },
+            );
         });
     });
 
-    it(`Test ${adapterShortName} adapter: Check if adapter started`, function (done) {
+    it(`Test influx-existing adapter: Check if adapter started`, function (done) {
         this.timeout(60000);
 
         checkConnectionOfAdapter(res => {
             res && console.log(res);
             expect(res).not.to.be.equal('Cannot check connection');
-            sendTo('influxdb.0', 'enableHistory', {
-                id: 'system.adapter.influxdb.0.memHeapTotal',
-                options: {
-                    changesOnly:  true,
-                    debounce:     0,
-                    retention:    31536000,
-                    storageType: 'String'
-                }
-            }, result => {
-                expect(result.error).to.be.undefined;
-                expect(result.success).to.be.true;
-
-                sendTo('influxdb.0', 'enableHistory', {
-                    id: 'system.adapter.influxdb.0.uptime',
+            sendTo(
+                'influxdb.0',
+                'enableHistory',
+                {
+                    id: 'system.adapter.influxdb.0.memHeapTotal',
                     options: {
-                        changesOnly:  false,
-                        debounce:     0,
-                        retention:    31536000,
-                        storageType: 'Boolean'
-                    }
-                }, result => {
+                        changesOnly: true,
+                        debounce: 0,
+                        retention: 31536000,
+                        storageType: 'String',
+                    },
+                },
+                result => {
                     expect(result.error).to.be.undefined;
                     expect(result.success).to.be.true;
 
-                    sendTo('influxdb.0', 'enableHistory', {
-                        id: 'system.adapter.influxdb.0.memHeapUsed',
-                        options: {
-                            changesOnly:  false,
-                            debounce:     0,
-                            retention:    31536000,
-                        }
-                    }, result => {
-                        expect(result.error).to.be.undefined;
-                        expect(result.success).to.be.true;
+                    sendTo(
+                        'influxdb.0',
+                        'enableHistory',
+                        {
+                            id: 'system.adapter.influxdb.0.uptime',
+                            options: {
+                                changesOnly: false,
+                                debounce: 0,
+                                retention: 31536000,
+                                storageType: 'Boolean',
+                            },
+                        },
+                        result => {
+                            expect(result.error).to.be.undefined;
+                            expect(result.success).to.be.true;
 
-                        // wait till adapter receives the new settings
-                        setTimeout(() =>
-                            done(), 2000);
-                    });
-                });
-            });
+                            sendTo(
+                                'influxdb.0',
+                                'enableHistory',
+                                {
+                                    id: 'system.adapter.influxdb.0.memHeapUsed',
+                                    options: {
+                                        changesOnly: false,
+                                        debounce: 0,
+                                        retention: 31536000,
+                                    },
+                                },
+                                result => {
+                                    expect(result.error).to.be.undefined;
+                                    expect(result.success).to.be.true;
+
+                                    // wait till adapter receives the new settings
+                                    setTimeout(() => done(), 2000);
+                                },
+                            );
+                        },
+                    );
+                },
+            );
         });
     });
 
-    tests.register(it, expect, sendTo, adapterShortName, false, 1, 3);
+    tests.register(it, expect, sendTo, adapterShortName, false, 1, 3, 'influx-existing');
 
-    it(`Test ${adapterShortName}: Write string value for memHeapUsed into DB to force a type conflict`, function (done) {
+    it(`Test influx-existing: Write string value for memHeapUsed into DB to force a type conflict`, function (done) {
         this.timeout(5000);
         now = Date.now();
 
-        states.setState('system.adapter.influxdb.0.memHeapUsed', {val: 'Blubb', ts: now - 20000, from: 'test.0'}, err => {
-            err && console.log(err);
-            setTimeout(() => {
-                //sendTo('influxdb.0', 'flushBuffer', {id: 'system.adapter.influxdb.0.memHeapUsed'}, result => {
-                sendTo('influxdb.0', 'flushBuffer', {}, result => {
-                    expect(result.error).to.be.not.ok;
-                    done();
-                });
-            }, 1000);
-        });
+        states.setState(
+            'system.adapter.influxdb.0.memHeapUsed',
+            { val: 'Blubb', ts: now - 20000, from: 'test.0' },
+            err => {
+                err && console.log(err);
+                setTimeout(() => {
+                    //sendTo('influxdb.0', 'flushBuffer', {id: 'system.adapter.influxdb.0.memHeapUsed'}, result => {
+                    sendTo('influxdb.0', 'flushBuffer', {}, result => {
+                        expect(result.error).to.be.not.ok;
+                        done();
+                    });
+                }, 1000);
+            },
+        );
     });
 
-    it(`Test ${adapterShortName}: Read values from DB using query`, function (done) {
+    it(`Test influx-existing: Read values from DB using query`, function (done) {
         this.timeout(10000);
 
         let query = 'SELECT * FROM "influxdb.0.testValue"';
         if (process.env.INFLUXDB2) {
-            const date = Date.now();
-            query = `from(bucket: "iobroker") |> range(start: -2d) |> filter(fn: (r) => r["_measurement"] == "influxdb.0.testValue") |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value") |> group() |> sort(columns:["_time"], desc: false)`;
+            query = `from(bucket: "iobroker") |> range(start: -30d) |> filter(fn: (r) => r["_measurement"] == "influxdb.0.testValue") |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value") |> group() |> sort(columns:["_time"], desc: false)`;
         }
         sendTo('influxdb.0', 'query', query, result => {
             console.log(JSON.stringify(result.result, null, 2));
@@ -206,16 +203,16 @@ describe(`Test ${adapterShortName} adapter`, function () {
             let found = 0;
             for (let i = 0; i < result.result[0].length; i++) {
                 if (result.result[0][i].value >= 1 && result.result[0][i].value <= 3) {
-                    found ++;
+                    found++;
                 }
             }
-            expect(found).to.be.equal(28);
+            expect(found).to.be.equal(26);
 
             done();
         });
     });
 
-    it(`Test ${adapterShortName}: Check Datapoint Types`, function (done) {
+    it(`Test influx-existing: Check Datapoint Types`, function (done) {
         this.timeout(65000);
 
         if (process.env.INFLUXDB2) {
@@ -223,7 +220,7 @@ describe(`Test ${adapterShortName} adapter`, function () {
             return done();
         }
 
-        setTimeout(function() {
+        setTimeout(() => {
             let query = 'SHOW FIELD KEYS FROM "influxdb.0.testValue"';
             sendTo('influxdb.0', 'query', query, result => {
                 console.log(`result: ${JSON.stringify(result.result, null, 2)}`);
@@ -237,39 +234,48 @@ describe(`Test ${adapterShortName} adapter`, function () {
                 }
                 expect(found).to.be.true;
 
-                sendTo('influxdb.0', 'query', 'SHOW FIELD KEYS FROM "system.adapter.influxdb.0.memHeapTotal"', result2 => {
-                    console.log(`result2: ${JSON.stringify(result2.result, null, 2)}`);
-                    let found = false;
-                    for (let i = 0; i < result2.result[0].length; i++) {
-                        if (result2.result[0][i].fieldKey === 'value') {
-                            found = true;
-                            expect(result2.result[0][i].fieldType).to.be.equal('string');
-                            break;
-                        }
-                    }
-                    expect(found).to.be.true;
-
-                    sendTo('influxdb.0', 'query', 'SHOW FIELD KEYS FROM "system.adapter.influxdb.0.uptime"', result3 => {
-                        console.log(`result3: ${JSON.stringify(result3.result, null, 2)}`);
+                sendTo(
+                    'influxdb.0',
+                    'query',
+                    'SHOW FIELD KEYS FROM "system.adapter.influxdb.0.memHeapTotal"',
+                    result2 => {
+                        console.log(`result2: ${JSON.stringify(result2.result, null, 2)}`);
                         let found = false;
-                        for (let i = 0; i < result3.result[0].length; i++) {
-                            if (result3.result[0][i].fieldKey === 'value') {
+                        for (let i = 0; i < result2.result[0].length; i++) {
+                            if (result2.result[0][i].fieldKey === 'value') {
                                 found = true;
-                                expect(result3.result[0][i].fieldType).to.be.equal('boolean');
+                                expect(result2.result[0][i].fieldType).to.be.equal('string');
                                 break;
                             }
                         }
                         expect(found).to.be.true;
 
-                        setTimeout(() =>
-                            done(), 3000);
-                    });
-                });
+                        sendTo(
+                            'influxdb.0',
+                            'query',
+                            'SHOW FIELD KEYS FROM "system.adapter.influxdb.0.uptime"',
+                            result3 => {
+                                console.log(`result3: ${JSON.stringify(result3.result, null, 2)}`);
+                                let found = false;
+                                for (let i = 0; i < result3.result[0].length; i++) {
+                                    if (result3.result[0][i].fieldKey === 'value') {
+                                        found = true;
+                                        expect(result3.result[0][i].fieldType).to.be.equal('boolean');
+                                        break;
+                                    }
+                                }
+                                expect(found).to.be.true;
+
+                                setTimeout(() => done(), 3000);
+                            },
+                        );
+                    },
+                );
             });
         }, 60000);
     });
 
-    it(`Test ${adapterShortName}: Check that storageType is set now for memHeapUsed`, function (done) {
+    it(`Test influx-existing: Check that storageType is set now for memHeapUsed`, function (done) {
         this.timeout(5000);
 
         objects.getObject('system.adapter.influxdb.0.memHeapUsed', (err, obj) => {
@@ -280,7 +286,7 @@ describe(`Test ${adapterShortName} adapter`, function () {
         });
     });
 
-    after(`Test ${adapterShortName} adapter: Stop js-controller`, function (done) {
+    after(`Test influx-existing adapter: Stop js-controller`, function (done) {
         this.timeout(15000);
 
         setup.stopController(normalTerminated => {

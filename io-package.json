@@ -151,7 +151,6 @@
       "Apollon77 <ingo@fischer-ka.de>",
       "Excodibur"
     ],
-    "license": "MIT",
     "readme": "https://github.com/ioBroker/ioBroker.influxdb/blob/master/README.md",
     "icon": "influxdb.png",
     "extIcon": "https://raw.githubusercontent.com/ioBroker/ioBroker.influxdb/master/admin/influxdb.png",
@@ -164,6 +163,9 @@
     "plugins": {
       "sentry": {
         "dsn": "https://29eecf4e8c954f2ea78110d47a9b122d@sentry.iobroker.net/54"
+      },
+      "docker": {
+        "iobDockerComposeFiles": ["docker-compose.yaml"]
       }
     },
     "adminUI": {
@@ -304,7 +306,25 @@
     "disableSkippedValueLogging": false,
     "enableLogging": false,
     "customRetentionDuration": 365,
-    "relogLastValueOnStart": true
+    "relogLastValueOnStart": true,
+    "dockerInflux": {
+      "enabled": false,
+      "bind": "127.0.0.1",
+      "stopIfInstanceStopped": true,
+      "port": "8086",
+      "autoImageUpdate": true
+    },
+    "dockerGrafana": {
+      "enabled": false,
+      "bind": "0.0.0.0",
+      "stopIfInstanceStopped": true,
+      "port": "3000",
+      "autoImageUpdate": true,
+      "adminSecurityPassword": "iobroker",
+      "serverRootUrl": "",
+      "plugins": [],
+      "usersAllowSignUp": true
+    }
   },
   "protectedNative": [
     "password",
