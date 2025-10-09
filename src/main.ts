@@ -549,7 +549,7 @@ export class InfluxDBAdapter extends Adapter {
 
     async testConnection(msg: ioBroker.Message): Promise<void> {
         this.log.debug(`testConnection msg-object: ${JSON.stringify(msg)}`);
-        if (!msg || !msg.message || !isObject(msg.message.config)) {
+        if (!msg?.message || !isObject(msg.message.config)) {
             return this.sendTo(msg.from, msg.command, { error: 'Invalid test configuration.' }, msg.callback);
         }
         const config: InfluxDBAdapterConfig = msg.message.config;
@@ -584,6 +584,7 @@ export class InfluxDBAdapter extends Adapter {
                                 warn: this.log.warn.bind(this.log),
                                 error: this.log.error.bind(this.log),
                             },
+                            adapterDir: `${__dirname}/../`,
                             namespace: this.namespace,
                         },
                         [influxDockerConfig],
