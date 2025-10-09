@@ -959,6 +959,14 @@ export class InfluxDBAdapter extends Adapter {
 
         this.subscribeForeignObjects('*');
 
+        if (this.config.dockerInflux?.enabled) {
+            this.config.dbversion = '2.x';
+            this.config.dockerInflux.port = parseInt((this.config.dockerInflux.port as string) || '8086', 10) || 8086;
+            this.config.protocol = 'http';
+            this.config.token = dockerDefaultToken;
+            this.config.organization = 'iobroker';
+        }
+
         if (this.config.dockerInflux?.enabled && this.config.dockerGrafana?.enabled) {
             this.prepareDockerConfigGrafana(this.config);
             // Inform docker plugin about grafana provisioning folder is ready
