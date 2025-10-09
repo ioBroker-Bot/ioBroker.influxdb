@@ -857,6 +857,14 @@ export class InfluxDBAdapter extends Adapter {
             this.config.round = null;
         }
         this.config.changesRelogInterval = parseNumber(this.config.changesRelogInterval, 0);
+        if (this.config.changesRelogInterval !== null && this.config.changesRelogInterval !== undefined) {
+            if (this.config.changesRelogInterval > 2147483) {
+                this.log.warn(
+                    'changesRelogInterval was configured too high. Please correct this in the settings. Set to 2147483 seconds (max. value).',
+                );
+                this.config.changesRelogInterval = 2147483;
+            }
+        }
         this.config.seriesBufferFlushInterval = parseInt(this.config.seriesBufferFlushInterval as string, 10) || 600;
         this.config.requestTimeout = parseInt(this.config.requestTimeout as string, 10) || 30000;
         this.config.changesMinDelta = parseNumber(this.config.changesMinDelta.toString().replace(/,/g, '.'), 0);
@@ -1053,6 +1061,15 @@ datasources:
                 );
 
             let ignoreDebounce = false;
+
+            if (settings.changesRelogInterval !== null && settings.changesRelogInterval !== undefined) {
+                if (settings.changesRelogInterval > 2147483) {
+                    this.log.warn(
+                        `changesRelogInterval was configured too high. Please correct this in the settings of '${id}'. Set to 2147483 seconds (max. value).`,
+                    );
+                    settings.changesRelogInterval = 2147483;
+                }
+            }
 
             if (!timerRelog) {
                 const valueUnstable = !!this._influxDPs[id].timeout;
