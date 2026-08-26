@@ -457,7 +457,7 @@ sendTo('influxdb.0', 'getEnabledDPs', {}, function (result) {
 -->
 
 ## Changelog
-### **WORK IN PROGRESS**
+### 5.0.2 (2026-08-26)
 * (@GermanBluefox) Added the data browser to the configuration, so the stored values can be viewed, edited and deleted.
 * (@GermanBluefox) The aggregation is used now from `@iobroker/aggregate` and is shared with the history and SQL adapters.
 * (@joltcoke) Fixed average and total returning null for every interval that contains a null value: parseFloat(null) is NaN and poisoned the sum of the whole interval (thanks to @joltcoke, ioBroker/ioBroker.sql#526). As the result was NaN and not null, ignoreNull could not act on it either
@@ -491,9 +491,6 @@ sendTo('influxdb.0', 'getEnabledDPs', {}, function (result) {
 
 ### 3.2.0 (2022-09-19)
 * (Apollon77) Adjust cache file to be different per instance when having multiple instances
-
-### 3.1.8 (2022-08-13)
-* (Apollon77) Fix crash cases reported by Sentry
 
 [Older changelogs can be found there](CHANGELOG_OLD.md)
 

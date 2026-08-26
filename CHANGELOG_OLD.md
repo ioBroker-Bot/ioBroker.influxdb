@@ -1,4 +1,7 @@
 # Older changes
+## 3.1.8 (2022-08-13)
+* (Apollon77) Fix crash cases reported by Sentry
+
 ## 3.1.7 (2022-06-27)
 * (Apollon77) Allows removing a configuration value for "round" in config again
 
