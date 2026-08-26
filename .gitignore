@@ -6,6 +6,7 @@ node_modules
 exe
 /tmp
 /build/
+src-admin/build
 *.tgz
 
 #ignore .commitinfo created by ioBroker release script

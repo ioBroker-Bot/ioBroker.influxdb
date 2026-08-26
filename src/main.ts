@@ -1,22 +1,69 @@
 import { statSync, readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { Adapter, type AdapterOptions, getAbsoluteDefaultDataDir } from '@iobroker/adapter-core'; // Get common adapter utils
+import { sendResponse, sortByTs } from '@iobroker/aggregate';
 
 import DatabaseInfluxDB1x from './lib/DatabaseInfluxDB1x';
 import DatabaseInfluxDB2x from './lib/DatabaseInfluxDB2x';
 import { escapeFluxString, escapeInfluxQLIdentifier, type Database, type ValuesForInflux } from './lib/Database';
-import * as Aggregate from './lib/aggregate';
 import type {
     GetHistoryOptions,
     InfluxDBAdapterConfig,
     InfluxDbCustomConfig,
     InfluxDbCustomConfigTyped,
     IobDataEntry,
+    RawEntriesOptions,
+    StorageType,
 } from './types';
 import { DockerManagerOfOwnContainers, type ContainerConfig } from '@iobroker/plugin-docker';
 const dataDir = getAbsoluteDefaultDataDir();
 
 const dockerDefaultToken = Buffer.from('iobroker86645638546565652656').toString('base64');
+
+/** Maximal number of entries one `getRawEntries` call may return */
+const MAX_RAW_ENTRIES = 2000;
+/** Oldest timestamp the data browser looks at. The adapter never writes a point before the epoch */
+const MIN_INFLUX_TIME = 0;
+/** Newest timestamp a Flux range may stop at. InfluxDB cannot store anything after it */
+const MAX_INFLUX_TIME = Date.UTC(2262, 3, 11);
+
+/**
+ * One point as the two clients deliver it.
+ *
+ * InfluxDB 1.x returns the fields of the point directly, InfluxDB 2.x returns the pivoted fields
+ * (`usetags` = false) or the value in `_value` and the metadata as tags, which are always strings.
+ */
+interface RawEntryRow {
+    time?: Date | string | number;
+    _time?: Date | string | number;
+    value?: number | string | boolean | null;
+    _value?: number | string | boolean | null;
+    ack?: boolean | number | string;
+    q?: number | string;
+    from?: string;
+    /** only in the answer of the counting query of InfluxDB 1.x */
+    total?: number;
+}
+
+/** Convert one stored point into the entry format of the ioBroker history API */
+function rawRowToEntry(row: RawEntryRow): IobDataEntry {
+    const value = row.value !== undefined ? row.value : row._value;
+    const entry: IobDataEntry = {
+        ts: new Date((row.time ?? row._time) as string).getTime(),
+        // the entry of the history API is typed as a number, but a measurement may hold strings or booleans
+        val: (value === undefined ? null : value) as number | null,
+    };
+    if (row.ack !== undefined) {
+        entry.ack = row.ack === true || row.ack === 1 || row.ack === 'true' || row.ack === '1';
+    }
+    if (row.q !== undefined) {
+        entry.q = typeof row.q === 'number' ? row.q : parseInt(row.q, 10) || 0;
+    }
+    if (row.from) {
+        entry.from = row.from;
+    }
+    return entry;
+}
 
 function isObject(it: any): boolean {
     // This is necessary because:
@@ -41,15 +88,6 @@ function extractError(error: any): string {
     }
 
     return error.toString();
-}
-
-function sortByTs(
-    a: { id?: string; val: number | string | boolean | null; ts: number },
-    b: { id?: string; val: number | string | boolean | null; ts: number },
-): 0 | 1 | -1 {
-    const aTs = a.ts;
-    const bTs = b.ts;
-    return aTs < bTs ? -1 : aTs > bTs ? 1 : 0;
 }
 
 function parseBool(value: any, defaultValue?: boolean): boolean {
@@ -738,7 +776,17 @@ export class InfluxDBAdapter extends Adapter {
                 this.sendTo(
                     msg.from,
                     msg.command,
-                    { supportedFeatures: ['update', 'delete', 'deleteRange', 'deleteAll', 'storeState'] },
+                    {
+                        supportedFeatures: [
+                            'update',
+                            'delete',
+                            'deleteRange',
+                            'deleteAll',
+                            'storeState',
+                            'getDatapoints',
+                            'getRawEntries',
+                        ],
+                    },
                     msg.callback,
                 );
             } else if (msg.command === 'update') {
@@ -805,6 +853,10 @@ export class InfluxDBAdapter extends Adapter {
                 });
             } else if (msg.command === 'getRetention') {
                 await this.getRetention(msg);
+            } else if (msg.command === 'getDatapoints') {
+                await this.getDatapoints(msg);
+            } else if (msg.command === 'getRawEntries') {
+                await this.getRawEntries(msg);
             }
         } catch (error) {
             this.log.error(`Cannot process message ${msg.command}: ${extractError(error)}`);
@@ -2751,14 +2803,7 @@ datasources:
             setTimeout(
                 async () => {
                     if (!this._client) {
-                        Aggregate.sendResponse(
-                            this as unknown as ioBroker.Adapter,
-                            msg,
-                            id,
-                            options,
-                            'Database no longer connected',
-                            startTime,
-                        );
+                        sendResponse(this, msg, id, options, 'Database no longer connected', startTime);
                         return;
                     }
                     try {
@@ -2851,37 +2896,16 @@ datasources:
                         }
 
                         try {
-                            Aggregate.sendResponse(
-                                this as unknown as ioBroker.Adapter,
-                                msg,
-                                id,
-                                options,
-                                result,
-                                startTime,
-                            );
+                            sendResponse(this, msg, id, options, result, startTime);
                         } catch (e) {
-                            Aggregate.sendResponse(
-                                this as unknown as ioBroker.Adapter,
-                                msg,
-                                id,
-                                options,
-                                e.toString(),
-                                startTime,
-                            );
+                            sendResponse(this, msg, id, options, e.toString(), startTime);
                         }
                     } catch (error) {
                         if (this._client.getHostsAvailable() === 0) {
                             this.setConnected(false);
                         }
                         this.log.error(`getHistory: ${extractError(error)}`);
-                        Aggregate.sendResponse(
-                            this as unknown as ioBroker.Adapter,
-                            msg,
-                            id,
-                            options,
-                            extractError(error),
-                            startTime,
-                        );
+                        sendResponse(this, msg, id, options, extractError(error), startTime);
                     }
                 },
                 storedCount ? 50 : 0,
@@ -3305,23 +3329,9 @@ ${!this.config.usetags ? '|> pivot(rowKey:["_time"], columnKey: ["_field"], valu
                         }
 
                         try {
-                            Aggregate.sendResponse(
-                                this as unknown as ioBroker.Adapter,
-                                msg,
-                                id,
-                                options,
-                                result,
-                                startTime,
-                            );
+                            sendResponse(this, msg, id, options, result, startTime);
                         } catch (e) {
-                            Aggregate.sendResponse(
-                                this as unknown as ioBroker.Adapter,
-                                msg,
-                                id,
-                                options,
-                                e.toString(),
-                                startTime,
-                            );
+                            sendResponse(this, msg, id, options, e.toString(), startTime);
                         }
                     } catch (error) {
                         if (!this._client?.getHostsAvailable()) {
@@ -3592,6 +3602,217 @@ ${!this.config.usetags ? '|> pivot(rowKey:["_time"], columnKey: ["_field"], valu
         }
 
         this.sendTo(msg.from, msg.command, data, msg.callback);
+    }
+
+    /**
+     * Every measurement the configured database (bucket) contains.
+     *
+     * A measurement is named after the ioBroker ID (or its alias) that was logged into it, so this is the
+     * list of datapoints that really have data - independent of whether their logging is still enabled.
+     */
+    async readMeasurements(): Promise<string[]> {
+        if (!this._client) {
+            throw new Error('not connected');
+        }
+
+        if (this.config.dbversion === '1.x') {
+            const rows = await this._client.query<{ name: string }>('SHOW MEASUREMENTS');
+            return (rows || []).map(row => row.name).filter(name => !!name);
+        }
+
+        // `schema.measurements` only looks at the last 30 days by default, so a datapoint whose logging
+        // was stopped earlier would be missing - the whole range InfluxDB can store must be scanned
+        const rows = await this._client.query<{ _value: string }>(
+            `import "influxdata/influxdb/schema"\nschema.measurements(bucket: "${escapeFluxString(this.config.dbname)}", start: ${new Date(MIN_INFLUX_TIME).toISOString()}, stop: ${new Date(MAX_INFLUX_TIME).toISOString()})`,
+        );
+        return (rows || []).map(row => row._value).filter(name => !!name);
+    }
+
+    /**
+     * The type a measurement stores its values as.
+     *
+     * InfluxDB pins the type of a measurement with its first point but does not report it, so it is taken
+     * from the places that know it: the configured `storageType`, the last logged value and finally the
+     * object behind the datapoint. It is only needed to interpret a value that is edited in the admin, so
+     * an unknown type (`null`) is no problem - and the data of a deleted state stays readable.
+     */
+    async getStorageType(id: string): Promise<StorageType | null> {
+        const settings: SavedInfluxDbCustomConfig | undefined = this._influxDPs[id];
+        if (settings?.storageType) {
+            return settings.storageType;
+        }
+
+        const cached = settings?.state?.val;
+        if (typeof cached === 'number') {
+            return 'Number';
+        }
+        if (typeof cached === 'boolean') {
+            return 'Boolean';
+        }
+        if (typeof cached === 'string') {
+            return 'String';
+        }
+
+        try {
+            const obj = await this.getForeignObjectAsync(settings?.realId || id);
+            switch ((obj?.common as ioBroker.StateCommon | undefined)?.type) {
+                case 'number':
+                    return 'Number';
+                case 'boolean':
+                    return 'Boolean';
+                case 'string':
+                    return 'String';
+            }
+        } catch {
+            // the object does not exist (anymore) - the data of a deleted state stays readable
+        }
+
+        return null;
+    }
+
+    /**
+     * Answer the `getDatapoints` message: every datapoint that has data in the database, no matter whether
+     * its logging is still enabled.
+     */
+    async getDatapoints(msg: ioBroker.Message): Promise<void> {
+        let measurements: string[];
+        try {
+            measurements = await this.readMeasurements();
+        } catch (error) {
+            this.log.error(`getDatapoints: ${extractError(error)}`);
+            return this.sendTo(msg.from, msg.command, { error: extractError(error) }, msg.callback);
+        }
+
+        const result: { id: string; type: StorageType | null }[] = [];
+        for (const id of measurements.sort((a, b) => a.localeCompare(b))) {
+            result.push({ id, type: await this.getStorageType(id) });
+        }
+
+        this.sendTo(msg.from, msg.command, { success: true, result }, msg.callback);
+    }
+
+    /**
+     * One page of the stored points of a measurement together with the number of points in the range.
+     *
+     * In contrast to `getHistory`, the points are returned exactly as they are in the database: no
+     * aggregation, no interpolation, no border values and no rounding.
+     */
+    async readRawEntries(id: string, options: RawEntriesOptions): Promise<{ entries: IobDataEntry[]; total: number }> {
+        if (!this._client) {
+            throw new Error('not connected');
+        }
+
+        let countQuery: string;
+        let dataQuery: string;
+
+        if (this.config.dbversion === '1.x') {
+            const safeId = escapeInfluxQLIdentifier(id);
+            const conditions: string[] = [];
+            if (options.start !== undefined) {
+                conditions.push(`time >= '${new Date(options.start).toISOString()}'`);
+            }
+            if (options.end !== undefined) {
+                conditions.push(`time <= '${new Date(options.end).toISOString()}'`);
+            }
+            const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
+
+            countQuery = `SELECT count(value) AS total FROM "${safeId}"${where}`;
+            dataQuery =
+                `SELECT * FROM "${safeId}"${where} ORDER BY time ${options.sort === 'asc' ? 'ASC' : 'DESC'}` +
+                ` LIMIT ${options.limit} OFFSET ${options.offset}`;
+        } else {
+            const safeId = escapeFluxString(id);
+            const safeBucket = escapeFluxString(this.config.dbname);
+            // "stop" of a Flux range is exclusive, so the requested end must be shifted by one millisecond
+            const start = new Date(options.start ?? MIN_INFLUX_TIME).toISOString();
+            const stop = new Date(options.end === undefined ? MAX_INFLUX_TIME : options.end + 1).toISOString();
+            const range = `|> range(start: ${start}, stop: ${stop})`;
+
+            countQuery =
+                `from(bucket: "${safeBucket}")\n${range}\n` +
+                `|> filter(fn: (r) => r["_measurement"] == "${safeId}" and r["_field"] == "value")\n` +
+                `|> group()\n|> count(column: "_value")`;
+
+            // `group()` is essential: without it, sort and limit would be applied to every series
+            // (one per field or per tag combination) separately instead of to the page as a whole
+            dataQuery =
+                `from(bucket: "${safeBucket}")\n${range}\n` +
+                `|> filter(fn: (r) => r["_measurement"] == "${safeId}")\n` +
+                `${this.config.usetags ? '' : '|> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")\n'}` +
+                `|> group()\n` +
+                `|> sort(columns:["_time"], desc: ${options.sort === 'asc' ? 'false' : 'true'})\n` +
+                `|> limit(n: ${options.limit}, offset: ${options.offset})` +
+                `${this.config.usetags ? '\n|> duplicate(column: "_value", as: "value")' : ''}`;
+        }
+
+        this.log.debug(`getRawEntries queries to execute: ${countQuery}\n---\n${dataQuery}`);
+
+        const rows = await this._client.queries<RawEntryRow>([countQuery, dataQuery]);
+        this.setConnected(true);
+
+        // InfluxDB 1.x counts into the aliased column "total", 2.x into the Flux column "_value"
+        const counted = rows?.[0]?.[0];
+        const total = parseInt((counted?.total ?? counted?._value) as unknown as string, 10) || 0;
+
+        return { entries: (rows?.[1] || []).map(row => rawRowToEntry(row)), total };
+    }
+
+    /**
+     * Answer the `getRawEntries` message: one page of the stored points of a datapoint together with the
+     * total number of points in the range, so that a table can page through them.
+     */
+    async getRawEntries(msg: ioBroker.Message): Promise<void> {
+        if (!msg.message?.id) {
+            this.log.error('getRawEntries called with invalid data');
+            return this.sendTo(msg.from, msg.command, { error: `Invalid call: ${JSON.stringify(msg)}` }, msg.callback);
+        }
+
+        const toTs = (value: unknown): number | undefined => {
+            if (value === undefined || value === null || value === '') {
+                return undefined;
+            }
+            const ts = typeof value === 'number' ? value : new Date(value as string).getTime();
+            return isFinite(ts) ? ts : undefined;
+        };
+
+        const id: string = this._aliasMap[msg.message.id] || msg.message.id;
+        const options: RawEntriesOptions = {
+            start: toTs(msg.message.start),
+            end: toTs(msg.message.end),
+            limit: Math.min(Math.max(parseInt(msg.message.limit, 10) || 100, 1), MAX_RAW_ENTRIES),
+            offset: Math.max(parseInt(msg.message.offset, 10) || 0, 0),
+            sort: msg.message.sort === 'asc' ? 'asc' : 'desc',
+        };
+
+        try {
+            // the points that are still in the buffer are not in the database yet, so a value that was
+            // just logged would be missing in the table
+            if (await this.storeBufferedSeries(id)) {
+                await new Promise<void>(resolve => setTimeout(resolve, 50));
+            }
+
+            const { entries, total } = await this.readRawEntries(id, options);
+
+            this.sendTo(
+                msg.from,
+                msg.command,
+                {
+                    id: msg.message.id,
+                    total,
+                    limit: options.limit,
+                    offset: options.offset,
+                    sort: options.sort,
+                    result: entries,
+                },
+                msg.callback,
+            );
+        } catch (error) {
+            if (!this._client?.getHostsAvailable()) {
+                this.setConnected(false);
+            }
+            this.log.error(`getRawEntries: ${extractError(error)}`);
+            this.sendTo(msg.from, msg.command, { error: extractError(error) }, msg.callback);
+        }
     }
 }
 

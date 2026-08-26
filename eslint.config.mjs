@@ -16,6 +16,12 @@ export default [
             'admin/admin.d.ts',
             '**/adapter-config.d.ts',
 
+            // the admin component has its own eslint config, and 'admin/custom' is its build result
+            'src-admin/**/*',
+            'admin/custom/**/*',
+            // build script outside of the TypeScript project of the adapter
+            'tasks.ts',
+
             // these files need to be adapted in the future
             'admin/blockly.js',
         ],

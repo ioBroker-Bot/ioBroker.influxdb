@@ -381,6 +381,20 @@
                 }
             }
         },
+        "dataTab": {
+            "type": "panel",
+            "label": "Data browser",
+            "items": {
+                "_dataBrowser": {
+                    "type": "custom",
+                    "i18n": true,
+                    "url": "custom/customComponents.js",
+                    "name": "InfluxDBComponentsSet/Components/DataBrowser",
+                    "guiApi": 2,
+                    "sm": 12
+                }
+            }
+        },
         "dockerInflux": {
             "type": "panel",
             "label": "InfluxDB Docker",
