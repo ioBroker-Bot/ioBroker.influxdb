@@ -4,6 +4,7 @@ import { Database, type ValuesForInflux } from './Database';
 export default class DatabaseInfluxDB1x extends Database {
     private readonly username: string;
     private readonly password: string;
+    private readonly validateSSL: boolean;
     private connection: InfluxDB | null = null;
 
     constructor(
@@ -18,11 +19,13 @@ export default class DatabaseInfluxDB1x extends Database {
         db1xOptions: {
             username: string;
             password: string;
+            validateSSL?: boolean;
         },
     ) {
         super(options);
         this.username = db1xOptions.username;
         this.password = db1xOptions.password;
+        this.validateSSL = db1xOptions.validateSSL !== undefined ? db1xOptions.validateSSL : true;
 
         this.connect();
     }
@@ -37,6 +40,10 @@ export default class DatabaseInfluxDB1x extends Database {
             username: this.username,
             password: this.password,
             database: this.database,
+            // Honor the configured request timeout (otherwise requests could hang indefinitely)
+            pool: this.requestTimeout ? { requestTimeout: this.requestTimeout } : undefined,
+            // Honor SSL validation setting for https connections
+            options: this.protocol === 'https' ? { rejectUnauthorized: this.validateSSL } : undefined,
         });
     }
 
@@ -85,7 +92,7 @@ export default class DatabaseInfluxDB1x extends Database {
             shardGroupDuration: string;
             replicaN: number;
             default: boolean;
-        }>(`SHOW RETENTION POLICIES ON "${dbname}"`);
+        }>(`SHOW RETENTION POLICIES ON ${escape.quoted(dbname)}`);
         const regex = /(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/;
         let retentionTime: number | undefined;
         let retentionName: string | null = null;
@@ -118,7 +125,8 @@ export default class DatabaseInfluxDB1x extends Database {
             return;
         }
 
-        const shardDuration = this.calculateShardGroupDuration(parseInt(retention as string, 10));
+        const retentionSeconds = parseInt(retention as string, 10) || 0;
+        const shardDuration = this.calculateShardGroupDuration(retentionSeconds);
         oldRetention ||= { name: null, time: undefined };
 
         // Get the name of currently active default policy first, to update only it.
@@ -134,7 +142,7 @@ export default class DatabaseInfluxDB1x extends Database {
             `Applying retention policy (${retentionName}) for ${dbname} to ${retention === 0 ? 'infinity' : `${retention} seconds`}. Shard Duration: ${shardDuration} seconds`,
         );
         await this.connection!.query(
-            `${command} RETENTION POLICY "${retentionName}" ON "${dbname}" DURATION ${retention}s REPLICATION 1 SHARD DURATION ${shardDuration}s DEFAULT`,
+            `${command} RETENTION POLICY ${escape.quoted(retentionName)} ON ${escape.quoted(dbname)} DURATION ${retentionSeconds}s REPLICATION 1 SHARD DURATION ${shardDuration}s DEFAULT`,
         );
     }
 
